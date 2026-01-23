@@ -34,24 +34,26 @@ from matplotlib.animation import FuncAnimation
 box_width  = 2.0
 box_height = 1.0
 
-m = 10.0
+m = 7.0
 I = (m/12.0) * (box_width**2 + box_height**2)
 
 # Contact/friction parameters (need not be tiny if you want strong contact torques)
 k_n   = 2000.0
 c_n   = 60.0
-mu    = 0.8
+mu    = 0.3
 eps_v = 0.05
 beta  = 200.0
 
 # wall2 motion
-theta0 = 1.2 * np.pi / 2
-Omega  = 0.0
+theta0 = 1.0 * np.pi / 2
+Omega  = np.pi/12
 L      = 6.0
 
 # simulation/animation
 fps = 60
 dt  = 1.0 / fps
+# dt = 0.1
+# fps = int(1.0/dt)
 
 # initial state [x, y, psi, vx, vy, omega]
 x0 = np.array([box_width/2+1e-6, box_height/2+1e-6, 0, 0.0, 0.0, 0.0], dtype=float)
@@ -180,7 +182,8 @@ def controller_opt_force(state: np.ndarray, theta: float):
     alpha = float(np.arctan2(u[1], u[0])) if F > 1e-9 else 0.0
     tau_u = float(a @ u)  # achieved torque about pivot (from applied force)
 
-    alpha = theta +1.1*np.pi/2
+    # alpha = theta +1.1*np.pi/2
+    alpha = float(np.arctan2(u[1], u[0])) if F > 1e-9 else 0.0
     return F, alpha, u, float(tau_des), tau_u
 
 
@@ -371,6 +374,7 @@ def main():
 
     ax.set_xlim(*xlim)
     ax.set_ylim(*ylim)
+
 
     force_arrow = None
     pivot_scatter = ax.scatter([], [], s=80)
