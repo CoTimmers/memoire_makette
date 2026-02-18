@@ -44,6 +44,7 @@ mu    = 0.3
 eps_v = 0.05
 beta  = 200.0
 
+
 # wall2 motion
 theta0 = 1.0 * np.pi / 2
 Omega  = np.pi/12
