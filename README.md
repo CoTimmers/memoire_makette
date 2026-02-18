@@ -19,3 +19,12 @@ On impose toujours une vitesse constante au mur qui pivote.
 
 * (Est-ce qu'on veut que ce soit faire le plus rapidement possible ?) Oui on va pas attendre que le mur ait fait 90° pour changer de commande. 
 *  
+
+
+
+
+
+* Objectif numéro 1: Tracker le mur, que le bac suive et colle au mur. Donc on veut avoir une force qui reste dans le cone de friction pour ne pas glisser. 
+
+* Objectif 2: atteindre la position finale voulue. Quand le bac  est orienté d'un certain angle --> Hard coder l'angle. 
+(Essayer de calculer l'inertie du bac qui tourne pour directement aller vers la position finale ?)
