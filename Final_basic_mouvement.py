@@ -1,3 +1,16 @@
+"je veux créer un code basic pour montrer c'est quoi le mouvement basic pour atteindre la position finale"
+"La plaque rectangulaire commence collé au mur 1 et 2, avec le long coté  collé au mur 2"
+"Mur 1: y=0"
+"Mur 2: x=0"
+"Mur 2 pivote de la position verticale, à vitesse constante pour atteindre + 90°"
+
+"Première phase: Appliquer une force au COM pour rester coller au mur pendant le pivotement."
+"Deuxième phase: Tirer le bac vers x+ pour que le coin supérieur gauche dépasse le pivot"
+"Troisème phase: Fermer le mur qui pivote"
+"Quatrième phase: Tirer le bac vers x- pour le positionner dans le coin"
+
+"Je veux pouvoir faire tout le code moi même"
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -14,7 +27,7 @@ psi0 = 0
 psiF = np.pi/2
 psi_demi = np.pi/4
 T = 6
-psi_dot = (psiF - psi0)/T
+# psi_dot = (psiF - psi0)/T
 psi_dot_dot_1 = (2 * (psi_demi - psi0)) / (T/2)**2
 psi_dot_dot_2 = (2 * (psiF - psi_demi)) / (T/2)**2
 
@@ -74,7 +87,8 @@ def wall_state(t):
     return psi, psi_dot, accel
 
 def normal_vector(t):
-    psi = psi0 + psi_dot * t
+    psi, _,_= wall_state(t)
+    # psi = psi0 + psi_dot * t
     n1 = np.array([0.0, 1.0], dtype=float)
     n2 = np.array([np.cos(psi), np.sin(psi)], dtype=float)
     t1 = np.array([1.0, 0.0], dtype=float)
@@ -142,12 +156,14 @@ def simulate_phase1(state0):
     # matrice 90° pour v = v_com + w * S*(r_rel)
     S = np.array([[0.0, -1.0],
                   [1.0,  0.0]], dtype=float)
+    
+    
 
     for k in range(N):
         t = k * dt
-
-        psi = psi0 + psi_dot * t
-        current_psi_ddot = psi_dot_dot_1 if psi < np.pi/4 else -psi_dot_dot_2
+        psi, psi_dot, psi_dot_dot = wall_state(t)
+        # psi = psi0 + psi_dot * t
+        # current_psi_ddot = psi_dot_dot_1 if psi < np.pi/4 else -psi_dot_dot_2
 
         n1, n2 , t1, t2= normal_vector(t)
         n2 = n2 / (np.linalg.norm(n2) + 1e-12)
@@ -156,10 +172,10 @@ def simulate_phase1(state0):
         x, y, theta, vx, vy, theta_dot = state
         #Force nécessaire pour faire tourner le bac à la vitesse du mur
 
-        Fy = (I * current_psi_ddot )/ (b/2)
+        Fy = (I * psi_dot_dot )/ (b/2)
 
         #Position et vitesse du bac au time-step
-        theta_dot += current_psi_ddot * dt
+        theta_dot += psi_dot_dot * dt
         theta += theta_dot * dt
 
         #Projeter la norme de la force nécessaire sur le vecteur normal
@@ -167,13 +183,13 @@ def simulate_phase1(state0):
         psi = psi0 + psi_dot * t
         r_mur = b
         a_n_mur = r_mur * psi_dot
-        a_t_mur = r_mur * current_psi_ddot
+        a_t_mur = r_mur * psi_dot_dot
         a_mur = np.sqrt(a_n_mur**2 + a_t_mur**2)
 
         #calcul pour la plaque qui veut suivre la vitesse du mur
         r_bac = np.sqrt((a/2)**2+(b/2)**2)
         a_n_bac = r_bac * psi_dot
-        a_t_bac = r_bac * current_psi_ddot
+        a_t_bac = r_bac * psi_dot_dot
         a_bac = np.sqrt(a_n_bac**2 + a_t_bac**2)
 
         # 1. Vecteur du COM vers le pivot
@@ -183,7 +199,7 @@ def simulate_phase1(state0):
         u_t = np.array([-u_r[1], u_r[0]])
 
         an = r_norm * (theta_dot**2)      
-        at = r_norm * current_psi_ddot  
+        at = r_norm * psi_dot_dot
         a_world = an * u_r - at * u_t
 
         vx += a_world[0] * dt
@@ -201,12 +217,58 @@ def simulate_phase1(state0):
 
     return state_hist, force_norm_hist, psi_hist, n2_hist
 
+
 state0 = [xc, yc, 0.0, 0.0, 0.0, 0.0]  # x,y,theta,vx,vy,theta_dot
 state_hist, force_norm_hist, psi_hist, n2_hist = simulate_phase1(
     state0
 )
-
 print(state_hist[N-1, 0], state_hist[N-1, 1], np.rad2deg(state_hist[N-1, 2]))
+
+
+#####Créer une fonction x(t) = g(F_n(t)) (Fonction pour la position de la grue qui peut imiter la force necessaire)
+
+
+# def get_crane_position(state_hist, n2_hist, cable_length=1.0):
+
+#     num_steps = state_hist.shape[0]
+#     crane_pos_hist = np.zeros((num_steps, 2))
+    
+#     for k in range(num_steps):
+#         # Position actuelle du COM du bac
+#         xc, yc = state_hist[k, 0], state_hist[k, 1]
+#         com_pos = np.array([xc, yc])
+    
+#         n2 = n2_hist[k]
+        
+#         crane_pos = com_pos + n2 * cable_length
+        
+#         crane_pos_hist[k] = crane_pos
+        
+#     return crane_pos_hist
+
+# crane_pos_hist = get_crane_position(state_hist, n2_hist, cable_length=1.0)
+
+
+
+#########################################################################################################
+
+
+
+
+def simulate_phase2(state1):
+    "Je veux prendre le dernier state de la phase précedente pour enchainer avec cette phase pour placer le bac au bon endroit"
+
+
+
+
+
+
+
+
+
+#########################################################################################################
+
+
 # --- Animation et Graphique ---
 # On crée deux lignes : une pour l'anim, une pour le graph
 fig, (ax, ax_force) = plt.subplots(2, 1, figsize=(7, 10), gridspec_kw={'height_ratios': [2, 1]})
@@ -220,6 +282,10 @@ ax.grid(True, linestyle=':')
 line_plaque, = ax.plot([], [], 'b-', lw=3, label='Bac')
 line_mur,    = ax.plot([], [], 'r-', lw=4, label='Mur 2')
 point_B,     = ax.plot([], [], 'go', markersize=8)
+
+# Dans ton setup
+line_cable, = ax.plot([], [], 'k--', lw=1, label='Câble')
+point_grue, = ax.plot([], [], 'ro', markersize=6, label='Grue')
 
 # 2. Setup Graphique Force
 ax_force.set_xlim(0, T)
@@ -260,9 +326,19 @@ def animate(k):
     force_plot.set_data(np.linspace(0, t, k+1), force_norm_hist[:k+1])
     time_text.set_text(f't = {t:.2f}s')
 
+    #grue 
+    crane_x, crane_y = crane_pos_hist[k]
+    xc, yc = state_hist[k, 0], state_hist[k, 1]
+
+    line_cable.set_data([xc, crane_x], [yc, crane_y])
+    point_grue.set_data([crane_x], [crane_y])
+
     return line_plaque, line_mur, point_B, force_plot
 
 ani = FuncAnimation(fig, animate, frames=N, init_func=init, blit=True, interval=50)
 
 plt.tight_layout()
 plt.show()
+
+
+######################
