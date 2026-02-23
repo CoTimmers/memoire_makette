@@ -37,8 +37,7 @@ dt = 6/N
 t_grid = np.linspace(0, 6, N)
 
 
-
-
+pf = [0.2, 0.02] #position de la grue à la position finale en prenant les erreurs de positionnement de la grue en compte
 
 
 
@@ -104,7 +103,6 @@ def corners_position(xc, yc, theta) -> np.ndarray: # exprimer la position d'un p
     ], dtype=float)
     return (rotation_matrix(theta) @ corners.T).T + np.array([xc, yc], dtype=float)
 
-# print(corners_position(-0.15,-0.20, np.pi/2))
 
 def distance(t, xc, yc, theta):
     n1, n2 = normal_vector(t)
@@ -124,7 +122,7 @@ def intensity_induced_force(psi, psi_dot, state): #on dit qu'on veut coller le c
     e = psi - theta
     ew =  psi_dot - theta_dot  
     alpha = Kp * e + Kd * ew
-    I = (m/3) * (a**2 + b**2) # moment of inertia depuis le coin du bac
+    I = (m/3) * (a**2 + b**2) 
     f = (I * alpha )/(b/2)
     return f
 
@@ -222,46 +220,113 @@ state0 = [xc, yc, 0.0, 0.0, 0.0, 0.0]  # x,y,theta,vx,vy,theta_dot
 state_hist, force_norm_hist, psi_hist, n2_hist = simulate_phase1(
     state0
 )
-print(state_hist[N-1, 0], state_hist[N-1, 1], np.rad2deg(state_hist[N-1, 2]))
 
 
-#####Créer une fonction x(t) = g(F_n(t)) (Fonction pour la position de la grue qui peut imiter la force necessaire)
 
+def crane_position(state_hist, force_norm_hist, n2_hist, kd = 0.5, cable_length=1.0):
+    "ajouter que la grue ne oeut pass se teleporter pour changer de force."
+    "je doiss ajoute une vitessse max"
 
-# def get_crane_position(state_hist, n2_hist, cable_length=1.0):
+    num_steps = state_hist.shape[0]
+    crane_pos_hist = np.zeros((num_steps, 2))
 
-#     num_steps = state_hist.shape[0]
-#     crane_pos_hist = np.zeros((num_steps, 2))
     
-#     for k in range(num_steps):
-#         # Position actuelle du COM du bac
-#         xc, yc = state_hist[k, 0], state_hist[k, 1]
-#         com_pos = np.array([xc, yc])
+    for k in range(num_steps):
+        # Position actuelle du COM du bac
+        xc, yc = state_hist[k, 0], state_hist[k, 1]
+        com_pos = np.array([xc, yc])
     
-#         n2 = n2_hist[k]
-        
-#         crane_pos = com_pos + n2 * cable_length
-        
-#         crane_pos_hist[k] = crane_pos
-        
-#     return crane_pos_hist
+        n2 = n2_hist[k]
 
-# crane_pos_hist = get_crane_position(state_hist, n2_hist, cable_length=1.0)
+        dist = ((force_norm_hist[k]) / kd )
+        
+        crane_pos = com_pos -n2 * (cable_length + dist)
 
+
+        
+        crane_pos_hist[k] = crane_pos
+        
+    return crane_pos_hist
+
+crane_pos_hist = crane_position(state_hist, force_norm_hist, n2_hist, kd = 10.0, cable_length=0.4)
 
 
 #########################################################################################################
 
 
 
-
-def simulate_phase2(state1):
+def simulate_phase2(crane_pos_hist, pf, acc):
     "Je veux prendre le dernier state de la phase précedente pour enchainer avec cette phase pour placer le bac au bon endroit"
+    dt = T / (N - 1)
+    state_crane = crane_pos_hist[N-1]
+    state_crane_hist = np.zeros((N, 2), dtype=float)
+    # vit_max_crane = 0.1 #m/s
+
+    d = pf - state_crane
+    L = np.linalg.norm(d)
+    u = d / L  # direction unitaire
+
+    x0, y0 = state_crane
+    v = 0.0
+    s = 0.0
+    for k in range(N):
+        # intégration MRUA sur s
+        s = s + v*dt + 0.5*acc*dt**2
+        v = v + acc*dt
+
+        # stop à l'arrivée
+        if s >= L:
+            s = L
+            v = 0.0
+
+        state_crane_hist[k] = state_crane + u*s
+        
+
+    return state_crane_hist
+
+crane_pos = simulate_phase2(crane_pos_hist, pf, acc = 0.1)
 
 
+p0 = state_hist[N-1, 0:2]    
+v0 = state_hist[N-1, 3:5]   
+
+def pos_crate(state_crane_hist, p0, v0, kd, m, dt, L0=1.0, only_tension=True):
+    N = state_crane_hist.shape[0]
+    p_hist = np.zeros((N, 2), float)
+    v_hist = np.zeros((N, 2), float)
 
 
+    p = np.asarray(p0, dtype=float).reshape(2,)
+    v = np.asarray(v0, dtype=float).reshape(2,)
 
+    # print(p)
+
+    for k in range(N):
+        c = state_crane_hist[k]
+        d = c - p                        
+
+        dist = np.linalg.norm(d)
+
+        F = kd * (c - p)
+
+
+        a = F / m 
+
+        p = p + v*dt + 0.5*a*dt**2
+        v = v + a*dt
+
+        #Anticiper la deceleration
+        #bug avec le y du crate
+
+        p_hist[k] = p
+        v_hist[k] = v
+
+    return p_hist, v_hist
+
+
+position_crate = pos_crate(crane_pos, p0, v0, 10.0, m, dt, L0=1.0, only_tension=True)
+
+print(position_crate)
 
 
 
@@ -270,29 +335,26 @@ def simulate_phase2(state1):
 
 
 # --- Animation et Graphique ---
-# On crée deux lignes : une pour l'anim, une pour le graph
 fig, (ax, ax_force) = plt.subplots(2, 1, figsize=(7, 10), gridspec_kw={'height_ratios': [2, 1]})
 
-# 1. Setup Animation (DÉZOOMÉ vers la gauche)
-ax.set_xlim(-0.6, 0.6) # On élargit à gauche
-ax.set_ylim(-0.1, 0.7)
+# Setup Axes
+ax.set_xlim(-1.0, 1.0)
+ax.set_ylim(-1.0, 1.0) # Augmenté un peu pour voir la grue en haut
 ax.set_aspect('equal')
 ax.grid(True, linestyle=':')
 
+# Création des objets graphiques
 line_plaque, = ax.plot([], [], 'b-', lw=3, label='Bac')
 line_mur,    = ax.plot([], [], 'r-', lw=4, label='Mur 2')
 point_B,     = ax.plot([], [], 'go', markersize=8)
 
-# Dans ton setup
+# --- LES AJOUTS ICI ---
 line_cable, = ax.plot([], [], 'k--', lw=1, label='Câble')
 point_grue, = ax.plot([], [], 'ro', markersize=6, label='Grue')
 
-# 2. Setup Graphique Force
+# Setup Graphique Force
 ax_force.set_xlim(0, T)
 ax_force.set_ylim(0, np.max(force_norm_hist) * 1.2)
-ax_force.set_xlabel("Temps (s)")
-ax_force.set_ylabel("Force (N)")
-ax_force.set_title("Force exercée par le mur sur le bac")
 force_plot, = ax_force.plot([], [], 'orange', lw=2)
 time_text = ax_force.text(0.05, 0.9, '', transform=ax_force.transAxes)
 
@@ -300,8 +362,10 @@ def init():
     line_plaque.set_data([], [])
     line_mur.set_data([], [])
     point_B.set_data([], [])
+    line_cable.set_data([], []) # Initialiser
+    point_grue.set_data([], []) # Initialiser
     force_plot.set_data([], [])
-    return line_plaque, line_mur, point_B, force_plot
+    return line_plaque, line_mur, point_B, line_cable, point_grue, force_plot
 
 def animate(k):
     x, y, theta, _, _, _ = state_hist[k]
@@ -318,27 +382,22 @@ def animate(k):
     mur_end = pivot_world + t2 * 0.5
     line_mur.set_data([pivot_world[0], mur_end[0]], [pivot_world[1], mur_end[1]])
 
-    # Point B
+    # Point B (Pivot du bac)
     rB = np.array([x, y]) + R @ np.array([-a/2, b/2])
     point_B.set_data([rB[0]], [rB[1]])
+
+    # --- MISE À JOUR GRUE ---
+    crane_x, crane_y = crane_pos_hist[k]
+    xc, yc = state_hist[k, 0], state_hist[k, 1]
+    line_cable.set_data([xc, crane_x], [yc, crane_y])
+    point_grue.set_data([crane_x], [crane_y])
 
     # Graph Force
     force_plot.set_data(np.linspace(0, t, k+1), force_norm_hist[:k+1])
     time_text.set_text(f't = {t:.2f}s')
 
-    #grue 
-    crane_x, crane_y = crane_pos_hist[k]
-    xc, yc = state_hist[k, 0], state_hist[k, 1]
-
-    line_cable.set_data([xc, crane_x], [yc, crane_y])
-    point_grue.set_data([crane_x], [crane_y])
-
-    return line_plaque, line_mur, point_B, force_plot
+    # Retourner TOUS les objets modifiés
+    return line_plaque, line_mur, point_B, line_cable, point_grue, force_plot
 
 ani = FuncAnimation(fig, animate, frames=N, init_func=init, blit=True, interval=50)
-
-plt.tight_layout()
 plt.show()
-
-
-######################
