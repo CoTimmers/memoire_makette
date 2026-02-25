@@ -9,7 +9,6 @@
 "Troisème phase: Fermer le mur qui pivote"
 "Quatrième phase: Tirer le bac vers x- pour le positionner dans le coin"
 
-"Je veux pouvoir faire tout le code moi même"
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -27,7 +26,8 @@ psi0 = 0
 psiF = np.pi/2
 psi_demi = np.pi/4
 T = 6
-# psi_dot = (psiF - psi0)/T
+
+#acc & decell
 psi_dot_dot_1 = (2 * (psi_demi - psi0)) / (T/2)**2
 psi_dot_dot_2 = (2 * (psiF - psi_demi)) / (T/2)**2
 
@@ -36,7 +36,7 @@ N = 60
 dt = T/(N-1)
 t_grid = np.linspace(0, T, N)
 
-
+#position final crane phase 2
 pf = [0.25, -0.10]
 
 
@@ -46,8 +46,6 @@ vcx0 = 0.0
 vcy0 = 0.0
 
 pivot_world = np.array([0.0, 0.0], dtype=float)
-
-#définir les points A & B
 a_local = np.array([-a/2, -b/2], dtype=float)
 b_local = np.array([-a/2, +b/2], dtype=float)
 
@@ -62,12 +60,12 @@ def wall_state(t):
         return psi0, 0.0, 0.0
     
     if t <= t_mid:
-        # Phase 1 : Accélération
+        # Phase 1: Acceleration
         accel = psi_dot_dot_1
         psi = psi0 + 0.5 * accel * t**2
         psi_dot = accel * t
     elif t <= T:
-        # Phase 2 : Décélération
+        # Phase 2: Braking
         v_mid = psi_dot_dot_1 * t_mid
         p_mid = psi0 + 0.5 * psi_dot_dot_1 * t_mid**2
         
@@ -76,7 +74,7 @@ def wall_state(t):
         psi = p_mid + v_mid * dt_phase2 + 0.5 * accel * dt_phase2**2
         psi_dot = v_mid + accel * dt_phase2
     else:
-        # Phase 3 : Fixe à la fin
+        # Phase 3: wall fixed
         psi = psiF
         psi_dot = 0.0
         accel = 0.0
@@ -111,7 +109,7 @@ def distance(t, xc, yc, theta):
     dist_wall_2_b = np.dot(n2, db - pivot_world)
     return dist_wall_2_a, dist_wall_2_b
 
-# print(distance(6, 0.15, 0.20, np.pi/2))
+
 
 def intensity_induced_force(psi, psi_dot, state): #on dit qu'on veut coller le coin B à chaque time-step, donc on doit --> tau = f x r
     x, y, theta, vx, vy, theta_dot = state
@@ -135,7 +133,7 @@ def orientation_induced_force(f, state):
 def wrap_angle(a):
     return (a + np.pi) % (2*np.pi) - np.pi
 
-
+#Phase 1: stay close to the pivoting wall
 def simulate_phase1(state0):
     dt = T / (N - 1)
     state = np.array(state0, dtype=float)
@@ -149,7 +147,6 @@ def simulate_phase1(state0):
     B_local = np.array([-a/2,  b/2], dtype=float)
     A_to_com = np.array([a/2, b/2])
 
-    # matrice 90° pour v = v_com + w * S*(r_rel)
     S = np.array([[0.0, -1.0],
                   [1.0,  0.0]], dtype=float)
     
@@ -166,8 +163,8 @@ def simulate_phase1(state0):
         t2 = t2 / (np.linalg.norm(t2) + 1e-12)
 
         x, y, theta, vx, vy, theta_dot = state
-        #Force nécessaire pour faire tourner le bac à la vitesse du mur
-
+        
+        #Acceleration of the wall: psi_dot_dot, used in F=m*a to find F. 
         Fy = (I * psi_dot_dot )/ (b/2)
 
         #Position et vitesse du bac au time-step
@@ -182,7 +179,7 @@ def simulate_phase1(state0):
         a_t_mur = r_mur * psi_dot_dot
         a_mur = np.sqrt(a_n_mur**2 + a_t_mur**2)
 
-        #calcul pour la plaque qui veut suivre la vitesse du mur
+        #calcul pour la plaque qui va suivre le mur avec la meme vitesse
         r_bac = np.sqrt((a/2)**2+(b/2)**2)
         a_n_bac = r_bac * psi_dot
         a_t_bac = r_bac * psi_dot_dot
@@ -214,11 +211,11 @@ def simulate_phase1(state0):
     return state_hist, force_norm_hist, psi_hist, n2_hist
 
 
-state0 = [xc, yc, 0.0, 0.0, 0.0, 0.0]  # x,y,theta,vx,vy,theta_dot
-state_hist, force_norm_hist, psi_hist, n2_hist = simulate_phase1(
-    state0
-)
+state0 = [xc, yc, 0.0, 0.0, 0.0, 0.0] 
+state_hist, force_norm_hist, psi_hist, n2_hist = simulate_phase1(state0)
 
+
+#Phase 2: tranlate the crate horizontally at the right of the pivot
 def crane_position(state_hist, force_norm_hist, n2_hist, kd = 0.5, cable_length=1.0):
     "ajouter que la grue ne oeut pass se teleporter pour changer de force."
     "je doiss ajoute une vitessse max"
@@ -238,8 +235,6 @@ def crane_position(state_hist, force_norm_hist, n2_hist, kd = 0.5, cable_length=
         
         crane_pos = com_pos -n2 * (cable_length + dist)
 
-
-        
         crane_pos_hist[k] = crane_pos
         
     return crane_pos_hist
@@ -293,8 +288,6 @@ def pos_crate(state_crane_hist, p0, v0, kd, m, dt, c_damp = 20.0, y_floor = 0.15
     p = np.asarray(p0, dtype=float).reshape(2,)
     v = np.asarray(v0, dtype=float).reshape(2,)
 
-    # print(p)
-
     for k in range(N):
         c = state_crane_hist[k]
         d = c - p                        
@@ -311,7 +304,7 @@ def pos_crate(state_crane_hist, p0, v0, kd, m, dt, c_damp = 20.0, y_floor = 0.15
         if p[1] < y_floor:
             p[1] = y_floor
             if v[1] < 0.0:
-                v[1] = -restitution * v[1]  # restitution=0 -> stop net
+                v[1] = -restitution * v[1] 
 
         p_hist[k] = p
         v_hist[k] = v
@@ -323,7 +316,7 @@ p_hist2, v_hist2 = pos_crate(crane_pos, p0, v0, 10.0, m, dt, c_damp = 10.0, y_fl
 
 
 
-
+#Phase 3: after the wall is closed, the crate is brought in the corner between both walls. 
 def simulate_phase3(crane_pos_hist, pf, dt, N):
     state_crane0 = np.asarray(crane_pos_hist, float).reshape(2,)
     pf = np.asarray(pf, float).reshape(2,)
@@ -348,7 +341,7 @@ def simulate_phase3(crane_pos_hist, pf, dt, N):
         s = s + v*dt + 0.5*acc*dt**2
         v = v + acc*dt
 
-        # clamp sécurité
+        
         s = np.clip(s, 0.0, L)
         crane_hist[k] = state_crane0 + u*s
 
@@ -358,9 +351,7 @@ def simulate_phase3(crane_pos_hist, pf, dt, N):
 
 
 
-# =========================
-# 1) HOLD après phase 2
-# =========================
+
 extra_seconds = 5.0
 extra_steps = int(extra_seconds / dt)
 
@@ -437,9 +428,6 @@ point_B,     = ax.plot([], [], 'go', markersize=8)
 
 line_cable,  = ax.plot([], [], 'k--', lw=1, label='Câble')
 point_grue,  = ax.plot([], [], 'ro', markersize=6, label='Grue')
-
-# (Optionnel) visualiser le sol y=y_floor
-# ax.plot([-1, 1], [0.15, 0.15], 'k:', lw=1)
 
 ax_force.set_xlim(0, t_total)
 ax_force.set_ylim(0, np.max(force_norm_hist) * 1.2 if np.max(force_norm_hist) > 0 else 1.0)
