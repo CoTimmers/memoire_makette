@@ -351,60 +351,57 @@ plt.show()
 
 ###animation 
 
-
-def animate_solution(sol_X, sol_T, save_mp4=False, mp4_path="animation_bac.mp4", fps=20):
+def animate_solution(sol_X, sol_T):
     N_steps = sol_X.shape[1]
     dt = sol_T / (N_steps - 1)
-
+    
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.set_xlim(-0.2, 1.0)
     ax.set_ylim(-0.2, 1.0)
     ax.set_aspect('equal')
     ax.grid(True)
 
+    # Éléments graphiques
     line_wall1, = ax.plot([], [], 'k-', lw=4, label="Wall 1")
     line_wall2, = ax.plot([], [], 'r-', lw=4, label="Wall 2")
     rect = plt.Rectangle((0, 0), a, b, angle=0, color='blue', alpha=0.6)
     ax.add_patch(rect)
 
     def update(k):
+        # 1. Mise à jour du mur 2
         t_curr = k * dt
-        psi_k = float(sol.value(wall_state_casadi(t_curr)))  # <-- float for numpy plotting
-
-        # Wall 1 (static)
+        psi_k = sol.value(wall_state_casadi(t_curr))
+        
+        # Mur 1 (statique sur X)
         line_wall1.set_data([0, 1], [0, 0])
+        
+        # Mur 2 (pivotant depuis l'origine)
+        x_w2 = [0, ca.cos(psi_k)]
+        y_w2 = [0, ca.sin(psi_k)]
+        line_wall2.set_data(x_w2, y_w2)
 
-        # Wall 2 (pivoting from origin)
-        line_wall2.set_data([0, np.cos(psi_k)], [0, np.sin(psi_k)])
-
-        # Crate pose
+        # 2. Mise à jour du bac
         xc_k = sol_X[0, k]
         yc_k = sol_X[1, k]
         theta_k = sol_X[2, k]
-
+        
+        # Calcul du coin bas-gauche pour le dessin du rectangle
+        # Le rectangle plt.Rectangle se définit par son coin (x,y) et son angle
+        # On doit retrouver le coin local (-a/2, -b/2) dans le monde
         R = np.array([[np.cos(theta_k), -np.sin(theta_k)],
                       [np.sin(theta_k),  np.cos(theta_k)]])
         corner_local = np.array([-a/2, -b/2])
         corner_world = np.array([xc_k, yc_k]) + R @ corner_local
-
+        
         rect.set_xy(corner_world)
         rect.angle = np.degrees(theta_k)
-
+        
         return line_wall1, line_wall2, rect
 
     ani = animation.FuncAnimation(fig, update, frames=N_steps, interval=50, blit=True)
-    ax.legend()
-
-    if save_mp4:
-        # Requires ffmpeg installed on your system
-        writer = animation.FFMpegWriter(fps=fps, codec="libx264", bitrate=1800)
-        ani.save(mp4_path, writer=writer)
-        print(f"Saved MP4 to: {mp4_path}")
-
+    plt.legend()
     plt.show()
     return ani
 
-
-# ---- Call it like this ----
-ani = animate_solution(sol.value(X), float(sol.value(T_total)),
-                       save_mp4=True, mp4_path="animation_bac_moteur.mp4", fps=20)
+# Appel de l'animation après le sol = opti.solve()
+animate_solution(sol.value(X), sol.value(T_total))
