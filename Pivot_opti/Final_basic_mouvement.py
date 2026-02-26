@@ -14,6 +14,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from IPython.display import HTML
+from matplotlib.animation import FFMpegWriter
 
 #Parameters
 m = 7
@@ -25,7 +26,7 @@ mu = 0.3
 psi0 = 0
 psiF = np.pi/2
 psi_demi = np.pi/4
-T = 6
+T = 4
 
 #acc & decell
 psi_dot_dot_1 = (2 * (psi_demi - psi0)) / (T/2)**2
@@ -37,7 +38,7 @@ dt = T/(N-1)
 t_grid = np.linspace(0, T, N)
 
 #position final crane phase 2
-pf = [0.25, -0.10]
+pf = [0.25, 0.03]
 
 
 xc = 0.15
@@ -239,7 +240,7 @@ def crane_position(state_hist, force_norm_hist, n2_hist, kd = 0.5, cable_length=
         
     return crane_pos_hist
 
-crane_pos_hist = crane_position(state_hist, force_norm_hist, n2_hist, kd = 10.0, cable_length=0.4)
+crane_pos_hist = crane_position(state_hist, force_norm_hist, n2_hist, kd = 10.0, cable_length=0.1)
 
 
 
@@ -372,7 +373,7 @@ v0_3 = v_hist2_ext[-1]
 # =========================
 # 2) PHASE 3 (grue bouge vers pf_phase3)
 # =========================
-pf_phase3 = np.array([0.22, -0.10], float)
+pf_phase3 = np.array([0.22, 0.03], float)
 
 # IMPORTANT: phase3 démarre depuis la position finale de phase2 (pf)
 crane_pos_phase_3 = simulate_phase3(crane_pos[-1], pf_phase3, dt, N)
@@ -410,31 +411,35 @@ force_all = np.concatenate([
 frames_total = bac_xy_all.shape[0]
 t_total = frames_total * dt
 
-# =========================
-# Animation + graphe
-# =========================
-fig, (ax, ax_force) = plt.subplots(2, 1, figsize=(7, 10),
-                                   gridspec_kw={'height_ratios': [2, 1]})
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
 
-ax.set_xlim(-1.0, 1.0)
-ax.set_ylim(-1.0, 1.0)
+# =========================
+# FIGURE ANIMATION SEULE
+# =========================
+fig, ax = plt.subplots(figsize=(7, 7))
+
+ax.set_xlim(-0.75, 0.75)
+ax.set_ylim(-0.20, 0.75)
 ax.set_aspect('equal')
 ax.grid(True, linestyle=':')
 
 line_plaque, = ax.plot([], [], 'b-', lw=3, label='Bac')
 line_mur,    = ax.plot([], [], 'r-', lw=4, label='Mur 2')
-line_mur_horiz, = ax.plot([0.0, 0.5], [-0.15, -0.15], 'k-', lw=4, label='Mur horizontal')
+line_mur_horiz, = ax.plot([0.0, 0.5], [0.0, 0.0], 'k-', lw=4, label='Mur 1')
 point_B,     = ax.plot([], [], 'go', markersize=8)
 
 line_cable,  = ax.plot([], [], 'k--', lw=1, label='Câble')
 point_grue,  = ax.plot([], [], 'ro', markersize=6, label='Grue')
 
-ax_force.set_xlim(0, t_total)
-ax_force.set_ylim(0, np.max(force_norm_hist) * 1.2 if np.max(force_norm_hist) > 0 else 1.0)
-ax_force.set_xlabel("Temps (s)")
-ax_force.set_ylabel("Force (N)")
-force_plot, = ax_force.plot([], [], 'orange', lw=2)
-time_text = ax_force.text(0.05, 0.9, '', transform=ax_force.transAxes)
+time_text = ax.text(0.02, 0.98, '', transform=ax.transAxes, va='top')
+
+ax.legend(loc="lower right")
+
+def smoothstep(tau):
+    tau = np.clip(tau, 0.0, 1.0)
+    return 3*tau**2 - 2*tau**3
 
 def init():
     line_plaque.set_data([], [])
@@ -443,14 +448,8 @@ def init():
     point_B.set_data([], [])
     line_cable.set_data([], [])
     point_grue.set_data([], [])
-    force_plot.set_data([], [])
     time_text.set_text('')
-    return line_plaque, line_mur, line_mur_horiz, point_B, line_cable, point_grue, force_plot, time_text
-
-def smoothstep(tau):
-    tau = np.clip(tau, 0.0, 1.0)
-    return 3*tau**2 - 2*tau**3
-
+    return line_plaque, line_mur, line_mur_horiz, point_B, line_cable, point_grue, time_text
 
 def animate(k):
     t = k * dt
@@ -468,16 +467,12 @@ def animate(k):
     w_corners = (R @ corners).T + np.array([x, y])
     line_plaque.set_data(w_corners[:, 0], w_corners[:, 1])
 
-    # Mur (si ton wall_state fige après T, ça restera à psiF automatiquement)
-    # n1, n2, t1, t2 = normal_vector(t)
-    # mur_end = pivot_world + t2 * 0.5
-    # line_mur.set_data([pivot_world[0], mur_end[0]], [pivot_world[1], mur_end[1]])
-    # --- Mur : planning d'affichage indépendant ---
-    T1 = T                 # durée phase1 pivot
-    T2 = T                 # durée phase2 (ex: mouvement grue)
-    Thold = extra_seconds  # durée ajoutée entre phase2 et phase3
+    # Mur 2 : planning d'affichage indépendant (comme tu faisais)
+    T1 = T
+    T2 = T
+    Thold = extra_seconds
 
-    t_global = t  # ici t = k*dt
+    t_global = t
 
     if t_global <= T1:
         tau = t_global / T1 if T1 > 0 else 1.0
@@ -488,12 +483,11 @@ def animate(k):
 
     elif t_global <= T1 + T2 + Thold:
         tau = (t_global - (T1 + T2)) / Thold if Thold > 0 else 1.0
-        psi_draw = psiF + (psi0 - psiF) * smoothstep(tau)  # retour vers vertical
+        psi_draw = psiF + (psi0 - psiF) * smoothstep(tau)
 
     else:
         psi_draw = psi0
 
-    # Reconstruire t2 à partir de psi_draw
     t2 = np.array([-np.sin(psi_draw), np.cos(psi_draw)], dtype=float)
     mur_end = pivot_world + t2 * 0.5
     line_mur.set_data([pivot_world[0], mur_end[0]], [pivot_world[1], mur_end[1]])
@@ -507,12 +501,90 @@ def animate(k):
     line_cable.set_data([x, crane_x], [y, crane_y])
     point_grue.set_data([crane_x], [crane_y])
 
-    # Force plot
-    force_plot.set_data(np.linspace(0, t, k+1), force_all[:k+1])
-    time_text.set_text(f't = {t:.2f}s')
+    time_text.set_text(f"t = {t:.2f} s")
 
-    return line_plaque, line_mur, line_mur_horiz, point_B, line_cable, point_grue, force_plot, time_text
+    return line_plaque, line_mur, line_mur_horiz, point_B, line_cable, point_grue, time_text
 
-ani = FuncAnimation(fig, animate, frames=frames_total, init_func=init, blit=True, interval=50)
+ani = FuncAnimation(
+    fig, animate, frames=frames_total, init_func=init,
+    blit=True, interval=50
+)
+
 plt.tight_layout()
 plt.show()
+
+
+t_axis = np.arange(crane_all.shape[0]) * dt
+xg = crane_all[:, 0]
+yg = crane_all[:, 1]
+
+plt.figure(figsize=(6,6))
+plt.plot(xg, yg, lw=2, label="Crane trajectory")
+
+# Départ (rouge)
+plt.scatter([xg[0]], [yg[0]], s=120, marker="o", color="red", edgecolors="k", zorder=5, label="Start")
+
+# Fin (style “damier” ≈ marqueur X)
+plt.scatter([xg[-1]], [yg[-1]], s=160, marker="X", color="white", edgecolors="k", linewidths=2, zorder=6, label="End")
+
+plt.xlabel("x crane (m)")
+plt.ylabel("y crane (m)")
+plt.grid(True, linestyle=":")
+plt.axis("equal")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+
+
+kd = 10.0
+c_damp = 10.0
+
+# =========================
+# Tension phase 1
+# =========================
+T_phase1 = force_norm_hist.copy()   # déjà dans ton code (ce que tu plottais)
+
+# =========================
+# Tension phase 2 + hold
+# =========================
+F2 = kd * (crane_phase2_ext - p_hist2_ext) - c_damp * v_hist2_ext
+T_phase2 = np.linalg.norm(F2, axis=1)
+
+# =========================
+# Tension phase 3
+# =========================
+F3 = kd * (crane_pos_phase_3 - p_hist3) - c_damp * v_hist3
+T_phase3 = np.linalg.norm(F3, axis=1)
+
+# =========================
+# CONCAT total + temps
+# =========================
+Tension_all = np.concatenate([T_phase1, T_phase2, T_phase3])
+t_axis = np.arange(Tension_all.shape[0]) * dt
+
+# =========================
+# PLOT
+# =========================
+plt.figure(figsize=(9,4))
+plt.plot(t_axis, Tension_all, lw=2)
+plt.xlabel("Time (s)")
+plt.ylabel("Rope tension (N)")
+plt.grid(True, linestyle=":")
+plt.tight_layout()
+plt.show()
+
+
+
+# =========================
+# SAUVEGARDE EN GIF
+# =========================
+# Nécessite: pip install pillow
+gif_name = "animation_bac.gif"
+ani.save(gif_name, writer=PillowWriter(fps=20))
+print(f"GIF sauvegardé: {gif_name}")
+
+mp4_name = "animation_bac2.mp4"
+ani.save(mp4_name, writer=FFMpegWriter(fps=30, bitrate=1800))
+print(f"MP4 sauvegardé: {mp4_name}")
