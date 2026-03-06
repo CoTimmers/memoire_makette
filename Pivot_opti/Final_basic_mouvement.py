@@ -26,7 +26,7 @@ mu = 0.3
 psi0 = 0
 psiF = np.pi/2
 psi_demi = np.pi/4
-T = 4
+T = 6
 
 #acc & decell
 psi_dot_dot_1 = (2 * (psi_demi - psi0)) / (T/2)**2
