@@ -13,10 +13,10 @@ mu = 0.3
 
 r_corner_to_com = ca.vertcat(a/2, b/2)
 
-rA_body = ca.vertcat(-a/2, -b/2)   # O -> A in body frame
-rB_body = ca.vertcat(-a/2,  +b/2)  # O -> B in body frame
-rAB_body = ca.vertcat(0.0, b)      # A -> B in body frame
-rAO_body = ca.vertcat(a/2, b/2)    # A -> O in body frame
+rA_body = ca.vertcat(-a/2, -b/2)   
+rB_body = ca.vertcat(-a/2,  +b/2)  
+rAB_body = ca.vertcat(0.0, b)      
+rAO_body = ca.vertcat(a/2, b/2)  
 
 T_wall = 6.0
 
@@ -124,56 +124,44 @@ def wall_profile_numeric(t):
 
 
 def build_step_solver_implicit_no_newton(dt=0.002, h_crane=1.0, g0=9.81, amax=2.0, x_wall=0.0):
-    # ---------- parameters ----------
     t    = ca.SX.sym("t")
     l    = ca.SX.sym("l")
     ldot = ca.SX.sym("ldot")
     p_state = ca.vertcat(t, l, ldot)
 
-    # ---------- decision variables ----------
     fx    = ca.SX.sym("fx")
     fy    = ca.SX.sym("fy")
     lddot = ca.SX.sym("lddot")
-    fya   = ca.SX.sym("fya")   # normal at A
-    fbn   = ca.SX.sym("fbn")   # normal at B (local normal)
+    fya   = ca.SX.sym("fya")   
+    fbn   = ca.SX.sym("fbn") 
 
     x = ca.vertcat(fx, fy, lddot, fya, fbn)
 
-    # ---------- wall profile ----------
+
     psi, psidot, psiddot = wall_profile_casadi(t)
 
-    # ---------- kinematics ----------
+    
     delta, delta_dot, delta_ddot, ax, ay = delta_kinematics_casadi(
         l, ldot, lddot, psi, psidot, psiddot, b, r_corner_to_com
     )
 
-    # ---------- local basis at B ----------
-    # tangent follows the wall orientation
     tB = ca.vertcat(ca.cos(psi), ca.sin(psi))
-    # normal chosen so that:
-    # psi = pi/2 -> nB = [1, 0] (wall vertical, pushing to the right)
-    # psi = pi   -> nB = [0, 1] (wall horizontal, pushing upward)
     nB = ca.vertcat(ca.sin(psi), -ca.cos(psi))
 
-    # ---------- contact forces ----------
-    # A: horizontal ground
     fxa = -mu * fya
     fA = ca.vertcat(fxa, fya)
 
-    # B: rotating wall, local Coulomb
     fbt = -mu * fbn
     fB = fbn * nB + fbt * tB
 
     # crane force
     fc = ca.vertcat(fx, fy)
 
-    # ---------- geometry in world frame ----------
     R = rot(delta)
 
-    rAB_w = R @ rAB_body   # A -> B
-    rAO_w = R @ rAO_body   # A -> O
+    rAB_w = R @ rAB_body  
+    rAO_w = R @ rAO_body
 
-    # COM position from A
     pA = ca.vertcat(l, 0)
     pO = pA + rAO_w
     xc = pO[0]
@@ -182,14 +170,13 @@ def build_step_solver_implicit_no_newton(dt=0.002, h_crane=1.0, g0=9.81, amax=2.
     pB = pA + rAB_w
     yB = pB[1]
 
-    # ---------- dynamics ----------
     eq1 = (fA[0] + fB[0] + fx) - m * ax
     eq2 = (fA[1] + fB[1] + fy) - m * ay
     eq3 = cross2(rAO_w, fc) + cross2(rAB_w, fB) - I_A * delta_ddot
 
     F = ca.vertcat(eq1, eq2, eq3)
 
-    # ---------- crane geometry from (fx, fy) ----------
+    #crane geometry from (fx, fy)
     eps = 1e-9
     Fh = ca.sqrt(fx**2 + fy**2 + eps)
     sigma = ca.atan(m*g0 / Fh)
@@ -200,32 +187,49 @@ def build_step_solver_implicit_no_newton(dt=0.002, h_crane=1.0, g0=9.81, amax=2.
 
     xg = xc + d * ex
     yg = yc + d * ey
-
-    # ---------- previous-step parameters ----------
+    
     fx_prev = ca.SX.sym("fx_prev")
     fy_prev = ca.SX.sym("fy_prev")
     xg_prev = ca.SX.sym("xg_prev")
     yg_prev = ca.SX.sym("yg_prev")
     v_prev  = ca.SX.sym("v_prev")
+    
+    dF_max = 20.0   #[N/s]
+
+    g_vcrane = (fx - fx_prev)**2 + (fy - fy_prev)**2   # <= (dF_max*dt)²
 
     p = ca.vertcat(p_state, fx_prev, fy_prev, xg_prev, yg_prev, v_prev)
 
-    # ---------- simple placeholder cost ----------
-    l_next_pred = l + dt*ldot + 0.5*(dt**2)*lddot
-    ldot_next = ldot + dt*lddot
-    e = b - l_next_pred
-    alpha = 1 / (1 + (e/0.01)**2)
 
-    J = -l_next_pred + 1e-1 * alpha * ldot_next**2
 
-    # ---------- constraints ----------
+    # ---------- cost ----------
+    l_next_pred = l + dt*ldot + 0.5*(dt**2)*lddot   # 1 pas — utilisé pour la contrainte
+
+    # Trajectoire de référence
+    t_start_l = 3.5    # [s] début du mouvement de l
+    t_end_l   = 7.0    # [s] moment où l doit avoir atteint b
+    s = ca.fmin(1.0, ca.fmax(0.0, (t - t_start_l) / (t_end_l - t_start_l)))
+    l_ref = b * (3*s**2 - 2*s**3) 
+
+    # prediction of ldot 
+    T_pred         = 1.0
+    l_pred_long    = l    + T_pred*ldot    + 0.5*T_pred**2 * lddot
+    ldot_pred_long = ldot + T_pred*lddot
+
+    # Speed penalty
+    l_brake = 0.7 * b #--> 28cm 
+    w_vel   = 0.1 + 20.0 * ca.fmax(0.0, (l - l_brake) / (b - l_brake))**2
+    J = (l_pred_long - l_ref)**2 + w_vel * ldot_pred_long**2
+
+    #constraints
     g_lstop = l_next_pred - b
     g = ca.vertcat(
-        F,      # 3 equalities
-        fya,    # >= 0
-        fbn,
-        g_lstop,
-        delta
+        F,          
+        fya,        
+        fbn,       
+        g_lstop,    # l_next <= b
+        delta,      # 0 <= delta <= pi/2
+        g_vcrane    # crane force variation
     )
 
     nlp = {"x": x, "p": p, "f": J, "g": g}
@@ -236,8 +240,8 @@ def build_step_solver_implicit_no_newton(dt=0.002, h_crane=1.0, g0=9.81, amax=2.
     }
     S = ca.nlpsol("S_no_newton", "ipopt", nlp, opts)
 
-    lbg = [0.0, 0.0, 0.0,   0.0, 0.0, -ca.inf, 0.0]
-    ubg = [0.0, 0.0, 0.0,   ca.inf, ca.inf, 0.0, ca.pi/2]
+    lbg_base = [0.0, 0.0, 0.0,   0.0, 0.0, -ca.inf, 0.0, -ca.inf]
+    ubg_base = [0.0, 0.0, 0.0,   ca.inf, ca.inf, 0.0, ca.pi/2, (dF_max*dt)**2]
 
     # x = [fx, fy, lddot, fya, fbn]
     lbx = [-50.0, -50.0, -1e4, 0.0, 0.0]
@@ -257,7 +261,7 @@ def build_step_solver_implicit_no_newton(dt=0.002, h_crane=1.0, g0=9.81, amax=2.
             x0=x0,
             p=[tv, lv, ldotv, fx_prev_v, fy_prev_v, xg_prev_v, yg_prev_v, v_prev_v],
             lbx=lbx, ubx=ubx,
-            lbg=lbg, ubg=ubg
+            lbg=lbg_base, ubg=ubg_base
         )
 
         x_opt = sol["x"].full().squeeze()
@@ -306,8 +310,8 @@ if __name__ == "__main__":
 
     fx_prev = 0.0
     fy_prev = 0.0
-    xg_prev = 0.0
-    yg_prev = 0.0
+    xg_prev = float(a / 2)   # xc initial : bac à plat (l=0, delta=0)
+    yg_prev = float(b / 2)   # yc initial : bac à plat (l=0, delta=0)
     v_prev  = 0.0
 
     hist = {
@@ -373,12 +377,17 @@ if __name__ == "__main__":
         hist["yB"].append(float(extra["yB"]))
 
         # semi-implicit Euler
-        ldot = ldot + dt * lddot
-        l    = l    + dt * ldot
+        l    = l    + dt*ldot + 0.5*(dt**2)*lddot   
+        ldot = ldot + dt*lddot                    
 
         if l < 0.0:
             l = 0.0
             if ldot < 0.0:
+                ldot = 0.0
+
+        if l > b:
+            l = b
+            if ldot > 0.0:
                 ldot = 0.0
 
         dx = float(extra["xg"]) - xg_prev
@@ -388,6 +397,9 @@ if __name__ == "__main__":
         xg_prev, yg_prev = float(extra["xg"]), float(extra["yg"])
         fx_prev, fy_prev = fx, fy
         x0 = x_opt
+
+        # if l >= b:
+        #     print(f"Bac pivoté à 90° — l={l:.4f} m atteint b={b} m à t={t:.3f} s")
 
     print("Final l =", hist["l"][-1])
     print("Final t =", hist["t"][-1])
