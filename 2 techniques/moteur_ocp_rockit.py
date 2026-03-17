@@ -154,11 +154,11 @@ def dynamics_ca(l, ldot, fx, fy, t):
 #   Phase 2  (t_sw ≤ t ≤ T_wall) : rampe linéaire 0 → b
 #   Après    (t > T_wall) : b constant
 #
-# t_sw = instant où ψ atteint 135° = 3π/4
-# ψ atteint 135° dans la phase à vitesse constante (t1 < t_sw < t2) :
-#   ψ(t) = p1 + v1*(t - t1)  →  t_sw = t1 + (3π/4 - p1) / v1
+# t_sw = instant où ψ atteint 127° = 90° + 37°
+# ψ atteint 127° dans la phase à vitesse constante (t1 < t_sw < t2) :
+#   ψ(t) = p1 + v1*(t - t1)  →  t_sw = t1 + (127° - p1) / v1
 # ══════════════════════════════════════════════════════════════════════
-_t_sw = _t1 + (3*np.pi/4 - _p1) / _v1   # ≈ 3.0 s
+_t_sw = _t1 + (np.radians(127) - _p1) / _v1   # ≈ 2.7 s
 
 def l_ref_ca(t):
     ramp = b * (t - _t_sw) / (T_wall - _t_sw)   # 0 à b sur [t_sw, T_wall]
@@ -174,10 +174,17 @@ def l_ref_ca(t):
 # ══════════════════════════════════════════════════════════════════════
 ocp  = Ocp(T=T_sim)
 
+
 l    = ocp.state()
 ldot = ocp.state()
-fx   = ocp.control()
-fy   = ocp.control()
+
+fx   = ocp.state()
+fy   = ocp.state()
+
+
+dF_max = 20.0   
+dfx  = ocp.control()
+dfy  = ocp.control()
 
 t = ocp.t
 
@@ -185,41 +192,53 @@ lddot, fyA, fBn = dynamics_ca(l, ldot, fx, fy, t)
 
 ocp.set_der(l,    ldot)
 ocp.set_der(ldot, lddot)
+ocp.set_der(fx,   dfx)
+ocp.set_der(fy,   dfy)
 
-# ── Fonction objectif ────────────────────────────────────────────────
+### follow the ref
 l_ref = l_ref_ca(t)
 ocp.add_objective(ocp.integral((l - l_ref)**2))
+
+#minimize the effort
+# ocp.add_objective(ocp.integral(fx**2 + fy**2))
 
 # Coût terminal : atteindre l=b avec ldot=0
 ocp.add_objective(1e2 * (ocp.at_tf(l) - b)**2)
 ocp.add_objective(1e1 *  ocp.at_tf(ldot)**2)
 
-# Petite régularisation pour le conditionnement numérique
-W_u = 1e-4
-ocp.add_objective(W_u * ocp.integral(fx**2 + fy**2))
 
-# ── Contraintes physiques (souples) ──────────────────────────────────
-# Les contraintes dures causent une infaisabilité car IPOPT ne peut pas
-# trouver un point initial cohérent. On utilise des pénalités quadratiques
-# sur les violations : W_c * max(0, -f)^2
+# W_u = 1e-4
+# ocp.add_objective(W_u * ocp.integral(fx**2 + fy**2))
+
+
 W_c = 1e2
 ocp.add_objective(W_c * ocp.integral(ca.fmax(0.0, -fyA)**2))   # fyA >= 0
 ocp.add_objective(W_c * ocp.integral(ca.fmax(0.0, -fBn)**2))   # fBn >= 0
 
-# ── Contraintes dures sur la commande et l'état ───────────────────────
+
 ocp.subject_to(fx >= -F_max)
 ocp.subject_to(fx <=  F_max)
 ocp.subject_to(fy >= -F_max)
 ocp.subject_to(fy <=  F_max)
 
+
+ocp.subject_to(dfx**2 + dfy**2 <= dF_max**2)
+
 ocp.subject_to(l >= 0)
 ocp.subject_to(l <= b)
 
-# ── Conditions initiales ─────────────────────────────────────────────
+# Phase 1 : forte pénalité pour garder l ≈ 0 pendant la rotation du mur
+# (contrainte dure non utilisée : ca.if_else non-lisse → IPOPT échoue)
+# W_phase1 = 1e4
+# ocp.add_objective(W_phase1 * ocp.integral(ca.if_else(t <= _t_sw, l**2, 0.0)))
+
+
 ocp.subject_to(ocp.at_t0(l)    == 0.0)
 ocp.subject_to(ocp.at_t0(ldot) == 0.0)
+ocp.subject_to(ocp.at_t0(fx)   == 0.0)
+ocp.subject_to(ocp.at_t0(fy)   == 0.0)
 
-# ── Solveur ──────────────────────────────────────────────────────────
+
 ocp.solver('ipopt', {
     'ipopt.print_level'  : 5,
     'ipopt.max_iter'     : 1000,
@@ -231,13 +250,13 @@ print("Résolution OCP...")
 sol = ocp.solve()
 print("Résolu !")
 
-# ══════════════════════════════════════════════════════════════════════
-# EXTRACTION DE LA SOLUTION
-# ══════════════════════════════════════════════════════════════════════
+
 ts,   l_sol    = sol.sample(l,    grid='control')
 _,    ldot_sol = sol.sample(ldot, grid='control')
 _,    fx_sol   = sol.sample(fx,   grid='control')
 _,    fy_sol   = sol.sample(fy,   grid='control')
+_,    dfx_sol  = sol.sample(dfx,  grid='control')
+_,    dfy_sol  = sol.sample(dfy,  grid='control')
 
 def l_ref_np(t):
     if t < _t_sw:
@@ -306,71 +325,81 @@ fBn_sol = np.array([contact_forces_np(float(li), float(ldi), float(fxi), float(f
                     for li, ldi, fxi, fyi, ti in zip(l_sol, ldot_sol, fx_sol, fy_sol, ts)])
 
 # ══════════════════════════════════════════════════════════════════════
-# PLOTS
+# PLOTS  — une figure par courbe, fond blanc
 # ══════════════════════════════════════════════════════════════════════
-fig, axes = plt.subplots(2, 3, figsize=(16, 8))
-fig.patch.set_facecolor('#0d0f14')
-
-def style(ax):
-    ax.set_facecolor('#13161e')
-    ax.tick_params(colors='#8899bb')
-    ax.grid(True, alpha=0.2, color='#232840')
-    for sp in ax.spines.values():
-        sp.set_edgecolor('#232840')
-    ax.xaxis.label.set_color('#8899bb')
-    ax.yaxis.label.set_color('#8899bb')
-    ax.title.set_color('#c8d4f0')
-
-for ax in axes.flat:
-    style(ax)
+dF_norm = np.sqrt(dfx_sol**2 + dfy_sol**2)
 
 # ── l(t) vs l_ref ──
-axes[0,0].plot(ts, l_sol,    color='#5ee7ff', lw=1.8, label='l(t) OCP')
-axes[0,0].plot(ts, l_ref_num, color='#ffb347', lw=1.4, ls='--', label='l_ref')
-axes[0,0].axhline(b, color='#56f0a0', lw=1, ls=':', alpha=0.7, label=f'cible b={b} m')
-axes[0,0].set_title('l(t) — suivi de référence')
-axes[0,0].set_ylabel('l (m)'); axes[0,0].set_xlabel('t (s)')
-axes[0,0].legend(fontsize=8, facecolor='#13161e', labelcolor='#c8d4f0')
+fig1, ax = plt.subplots(figsize=(7, 4))
+ax.plot(ts, l_sol,     color='steelblue',   lw=1.8, label='l(t) OCP')
+ax.plot(ts, l_ref_num, color='darkorange',  lw=1.4, ls='--', label='l_ref')
+ax.axhline(b, color='seagreen', lw=1, ls=':', alpha=0.8, label=f'target b={b} m')
+ax.set_title('l(t) — reference tracking')
+ax.set_ylabel('l (m)'); ax.set_xlabel('t (s)')
+ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig('l(t).png', dpi=150, bbox_inches='tight')
+plt.show()
 
 # ── ḷ(t) ──
-axes[0,1].plot(ts, ldot_sol, color='#b57aff', lw=1.8)
-axes[0,1].axhline(0, color='#3a4560', lw=1)
-axes[0,1].set_title('ḷ(t)')
-axes[0,1].set_ylabel('ḷ (m/s)'); axes[0,1].set_xlabel('t (s)')
+fig2, ax = plt.subplots(figsize=(7, 4))
+ax.plot(ts, ldot_sol, color='mediumpurple', lw=1.8)
+ax.axhline(0, color='gray', lw=1)
+ax.set_title('ḷ(t)')
+ax.set_ylabel('ḷ (m/s)'); ax.set_xlabel('t (s)')
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig('ldot(t).png', dpi=150, bbox_inches='tight')
+plt.show()
 
 # ── Commande fx, fy ──
-axes[1,0].plot(ts, fx_sol, color='#5ee7ff', lw=1.8, label='fx')
-axes[1,0].plot(ts, fy_sol, color='#ff5f6d', lw=1.8, label='fy')
-axes[1,0].axhline(0, color='#3a4560', lw=1)
-axes[1,0].axhline( F_max, color='#ffffff', lw=0.8, ls=':', alpha=0.4, label=f'±{F_max} N')
-axes[1,0].axhline(-F_max, color='#ffffff', lw=0.8, ls=':', alpha=0.4)
-axes[1,0].set_title('Commande optimale [fx, fy]')
-axes[1,0].set_ylabel('N'); axes[1,0].set_xlabel('t (s)')
-axes[1,0].legend(fontsize=8, facecolor='#13161e', labelcolor='#c8d4f0')
-
-# ── Erreur de suivi ──
-axes[1,1].plot(ts, l_sol - l_ref_num, color='#56f0a0', lw=1.8)
-axes[1,1].axhline(0, color='#3a4560', lw=1)
-axes[1,1].set_title('Erreur l(t) − l_ref(t)')
-axes[1,1].set_ylabel('m'); axes[1,1].set_xlabel('t (s)')
-
-# ── Forces de contact ──
-axes[0,2].plot(ts, fyA_sol, color='#5ee7ff', lw=1.8, label='fyA')
-axes[0,2].axhline(0, color='#3a4560', lw=1)
-axes[0,2].set_title('fyA — contact mur 1')
-axes[0,2].set_ylabel('N'); axes[0,2].set_xlabel('t (s)')
-axes[0,2].legend(fontsize=8, facecolor='#13161e', labelcolor='#c8d4f0')
-
-axes[1,2].plot(ts, fBn_sol, color='#ffb347', lw=1.8, label='fBn')
-axes[1,2].axhline(0, color='#ff5f6d', lw=1, ls='--', alpha=0.6, label='limite (0)')
-axes[1,2].set_title('fBn — contact mur 2')
-axes[1,2].set_ylabel('N'); axes[1,2].set_xlabel('t (s)')
-axes[1,2].legend(fontsize=8, facecolor='#13161e', labelcolor='#c8d4f0')
-
-plt.suptitle('OCP Rockit — commande optimale pour suivi de l_ref',
-             color='#c8d4f0', fontsize=13, fontweight='bold')
+fig3, ax = plt.subplots(figsize=(7, 4))
+ax.plot(ts, fx_sol, color='steelblue', lw=1.8, label='fx')
+ax.plot(ts, fy_sol, color='crimson',   lw=1.8, label='fy')
+ax.axhline(0, color='gray', lw=1)
+ax.set_title('Control forces [fx, fy]')
+ax.set_ylabel('N'); ax.set_xlabel('t (s)')
+ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
 plt.tight_layout()
-plt.savefig('ocp_results.png', dpi=150, bbox_inches='tight')
+plt.savefig('Command_fx,_fy.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# ── Taux de changement dfx, dfy + norme ──
+fig4, ax = plt.subplots(figsize=(7, 4))
+ax2_ = ax.twinx()
+ax.plot(ts, dfx_sol, color='steelblue', lw=1.4, label='dfx')
+ax.plot(ts, dfy_sol, color='crimson',   lw=1.4, label='dfy')
+ax2_.plot(ts, dF_norm,  color='seagreen',  lw=1.8, ls='--', label='‖df‖')
+ax2_.axhline(dF_max, color='darkorange', lw=1, ls=':', alpha=0.8, label=f'dF_max={dF_max}')
+ax2_.set_ylabel('‖df‖ (N/s)')
+ax.set_title('Rate of change [dfx, dfy]')
+ax.set_ylabel('N/s'); ax.set_xlabel('t (s)')
+ax.legend(fontsize=9, loc='upper left'); ax2_.legend(fontsize=9, loc='upper right')
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig('Angles.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# ── fyA — contact mur 1 ──
+fig5, ax = plt.subplots(figsize=(7, 4))
+ax.plot(ts, fyA_sol, color='steelblue', lw=1.8, label='fyA')
+ax.axhline(0, color='gray', lw=1)
+ax.set_title('fyA — contact wall 1')
+ax.set_ylabel('N'); ax.set_xlabel('t (s)')
+ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig('fyA__contact_wall_1.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# ── fBn — contact mur 2 ──
+fig6, ax = plt.subplots(figsize=(7, 4))
+ax.plot(ts, fBn_sol, color='darkorange', lw=1.8, label='fBn')
+ax.axhline(0, color='crimson', lw=1, ls='--', alpha=0.6, label='limit (0)')
+ax.set_title('fBn — contact wall 2')
+ax.set_ylabel('N'); ax.set_xlabel('t (s)')
+ax.legend(fontsize=9); ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig('fxB,_fyB__contact_wall_2.png', dpi=150, bbox_inches='tight')
 plt.show()
 
 print(f"\nl final       = {l_sol[-1]:.4f} m  (cible = {b} m)")
@@ -378,8 +407,14 @@ print(f"ḷ final       = {ldot_sol[-1]:.4f} m/s")
 print(f"Erreur max    = {np.max(np.abs(l_sol - l_ref_num)):.4f} m")
 print(f"fx max        = {np.max(np.abs(fx_sol)):.2f} N")
 print(f"fy max        = {np.max(np.abs(fy_sol)):.2f} N")
+print(f"‖df‖ max      = {np.max(np.sqrt(dfx_sol**2 + dfy_sol**2)):.2f} N/s  (limite = {dF_max} N/s)")
 print(f"fyA min       = {np.min(fyA_sol):.3f} N  (doit être ≥ 0)")
 print(f"fBn min       = {np.min(fBn_sol):.3f} N  (doit être ≥ 0)")
+idx = np.argmax(l_sol >= b - 1e-3)  # tolérance 1mm
+if l_sol[idx] >= b - 1e-3:
+    print(f"l atteint b={b} m à t = {ts[idx]:.4f} s")
+else:
+    print(f"l n'atteint jamais b (l_max = {np.max(l_sol):.4f} m)")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -431,35 +466,29 @@ for i in range(len(ts)):
     xB_anim[i] = xA_anim[i] + rAB[0];  yB_anim[i] = yA_anim[i] + rAB[1]
 
 # ── Figure d'animation ────────────────────────────────────────────────
-fig2, ax2 = plt.subplots(figsize=(8, 7))
-fig2.patch.set_facecolor('#0d0f14')
-ax2.set_facecolor('#13161e')
-ax2.set_xlim(-0.15, 0.65);  ax2.set_ylim(-0.1, 0.65)
+fig_anim, ax2 = plt.subplots(figsize=(8, 7))
+ax2.set_xlim(-0.65, 0.65);  ax2.set_ylim(-0.1, 0.65)
 ax2.set_aspect('equal')
-ax2.grid(True, alpha=0.2, color='#232840')
-ax2.tick_params(colors='#8899bb')
-for sp in ax2.spines.values():
-    sp.set_edgecolor('#232840')
-ax2.set_xlabel('x (m)', color='#8899bb')
-ax2.set_ylabel('y (m)', color='#8899bb')
-ax2.set_title('Animation OCP — commande optimale', color='#c8d4f0')
+ax2.grid(True, alpha=0.3)
+ax2.set_xlabel('x (m)')
+ax2.set_ylabel('y (m)')
+ax2.set_title('OCP animation — optimal control')
 
-wall1_line, = ax2.plot([0, 0.6], [0, 0],  color='#5ee7ff', lw=3,  label='mur 1')
-wall2_line, = ax2.plot([], [],             color='#ffad3b', lw=3,  label='mur 2')
-body_line,  = ax2.plot([], [],             color='#c8d4f0', lw=2,  label='bac')
-A_pt,       = ax2.plot([], [], 'o',        color='#ff5f6d', ms=7,  label='A')
-B_pt,       = ax2.plot([], [], 'o',        color='#56f0a0', ms=7,  label='B')
-O_pt,       = ax2.plot([], [], 'o',        color='#ffb347', ms=7,  label='O (COM)')
-force_line, = ax2.plot([], [],             color='#b57aff', lw=2,  label='force grue')
-lref_line,  = ax2.plot([], [], 's',        color='#ffb347', ms=5,  alpha=0.5, label='l_ref')
-traj_line,  = ax2.plot([], [],             color='#ffb347', lw=1,  alpha=0.4)
+wall1_line, = ax2.plot([0, 0.6], [0, 0],  color='steelblue',  lw=3,  label='wall 1')
+wall2_line, = ax2.plot([], [],             color='darkorange', lw=3,  label='wall 2')
+body_line,  = ax2.plot([], [],             color='dimgray',    lw=2,  label='body')
+A_pt,       = ax2.plot([], [], 'o',        color='crimson',    ms=7,  label='A')
+B_pt,       = ax2.plot([], [], 'o',        color='seagreen',   ms=7,  label='B')
+O_pt,       = ax2.plot([], [], 'o',        color='darkorange', ms=7,  label='O (COM)')
+force_line, = ax2.plot([], [],             color='mediumpurple', lw=2, label='crane force')
+lref_line,  = ax2.plot([], [], 's',        color='darkorange', ms=5,  alpha=0.5, label='l_ref')
+traj_line,  = ax2.plot([], [],             color='darkorange', lw=1,  alpha=0.4)
 
 info_txt = ax2.text(0.02, 0.97, '', transform=ax2.transAxes,
-                    color='#c8d4f0', fontsize=9, va='top', fontfamily='monospace',
-                    bbox=dict(facecolor='#13161e', alpha=0.7, edgecolor='#232840'))
+                    color='black', fontsize=9, va='top', fontfamily='monospace',
+                    bbox=dict(facecolor='white', alpha=0.7, edgecolor='lightgray'))
 
-ax2.legend(loc='upper right', fontsize=8,
-           facecolor='#13161e', labelcolor='#c8d4f0', edgecolor='#232840')
+ax2.legend(loc='upper right', fontsize=8)
 
 traj_x, traj_y = [], []
 
@@ -510,8 +539,11 @@ def update(i):
     return wall2_line, body_line, A_pt, B_pt, O_pt, force_line, lref_line, traj_line, info_txt
 
 dt_anim = float(ts[1] - ts[0])
-ani = FuncAnimation(fig2, update, frames=len(ts),
+ani = FuncAnimation(fig_anim, update, frames=len(ts),
                     interval=int(1000 * dt_anim), blit=False)
 
 plt.tight_layout()
+print("Sauvegarde du GIF...")
+ani.save('animation.gif', writer='pillow', fps=int(1.0 / dt_anim))
+print("GIF sauvegardé : animation.gif")
 plt.show()
