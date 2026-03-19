@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 from state import CrateState, SimParams, Mode
-from dynamics import f_continuous, integrate_step
+from dynamics import compute_contact_forces, integrate_step
 from controller import get_command
 from monitors import check_transition, get_box_geometry
 
@@ -69,8 +69,8 @@ def simulate(params: SimParams | None = None, initial_mode: Mode = Mode.PIVOTEME
         # ── Control (potential energy injection) ──────────────────────────
         fx, fy = get_command(state, t, params)
 
-        # ── Contact forces (for logging) ──────────────────────────────────
-        _, _, fyA_i, fBn_i, fxB_i, fyB_i, _, _ = f_continuous(
+        # ── Contact forces (diagnostic only — not used for control) ──────
+        fyA_i, fBn_i, fxB_i, fyB_i, _, _ = compute_contact_forces(
             state.l, state.ldot, fx, fy, t, params)
 
         # ── Record ────────────────────────────────────────────────────────

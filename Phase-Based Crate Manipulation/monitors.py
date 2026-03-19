@@ -18,7 +18,7 @@ Phase graph (from mindmap)
     └─ l <= l_final_end → None  (simulation done)
 """
 import numpy as np
-from state import CrateState, SimParams, Mode
+from state import CrateState, SimParams, Mode, get_corners_world
 from dynamics import wall_profile, delta_kinematics, rot
 
 
@@ -77,6 +77,37 @@ def dist_point_to_wall2(x: float, y: float, psi: float) -> float:
     return x * np.sin(psi) - y * np.cos(psi)
 
 
+# ── APPROACH / PUSH / CONTACT monitors ────────────────────────────────────────
+
+def first_corner_on_wall1(state: CrateState, params: SimParams) -> int:
+    """
+    Return the index (0-3) of the lowest corner if it has reached wall 1 (y ≤ 0),
+    or -1 if no corner is in contact yet.
+
+    Corner order (matches params.corners_body):
+      0: bottom-left  1: bottom-right  2: top-right  3: top-left
+    """
+    corners = get_corners_world(state, params)
+    y_vals  = corners[:, 1]
+    idx     = int(np.argmin(y_vals))
+    return idx if y_vals[idx] <= 0.0 else -1
+
+
+def side_flat_on_wall1(state: CrateState, params: SimParams) -> bool:
+    """
+    Return True when two adjacent corners are both within side_flat_tol of wall 1.
+    This signals that a full side is lying on wall 1 → end of CONTACT phase.
+    """
+    corners = get_corners_world(state, params)
+    y_vals  = corners[:, 1]
+    tol     = params.side_flat_tol
+    for i in range(4):
+        j = (i + 1) % 4
+        if abs(y_vals[i]) < tol and abs(y_vals[j]) < tol:
+            return True
+    return False
+
+
 # ── Phase transition monitors ──────────────────────────────────────────────────
 
 def check_transition(state: CrateState, t: float, params: SimParams):
@@ -98,9 +129,19 @@ def check_transition(state: CrateState, t: float, params: SimParams):
     psi, _, _ = wall_profile(t, params)
 
     if state.mode == Mode.APPROACH:
-        # A is considered on wall 1 when l is at the starting position
-        # (in practice, the robot camera verifies face alignment)
-        if state.l >= 0.0:
+        # Camera observes the crate state (x, y, theta, omega).
+        # Transition is immediate: state is always "known" in simulation.
+        return Mode.PUSH
+
+    elif state.mode == Mode.PUSH:
+        # Detect the first corner touching wall 1.
+        idx = first_corner_on_wall1(state, params)
+        if idx >= 0:
+            return Mode.CONTACT
+
+    elif state.mode == Mode.CONTACT:
+        # Detect when a full side is flat on wall 1.
+        if side_flat_on_wall1(state, params):
             return Mode.COINCEMENT
 
     elif state.mode == Mode.COINCEMENT:
