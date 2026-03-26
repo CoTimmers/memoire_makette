@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell.exe -Command \"Get-ChildItem ''c:\\\\Users\\\\David\\\\Documents\\\\Projects\\\\Thesis_KUL\\\\memoire_makette'' | ForEach-Object { $_FullName }\")",
+      "Bash(cmd.exe /c \"dir \"\"c:\\\\Users\\\\David\\\\Documents\\\\Projects\\\\Thesis_KUL\\\\memoire_makette\"\"\")",
+      "Bash(cmd.exe /c \"dir /b \"\"c:\\\\Users\\\\David\\\\Documents\\\\Projects\\\\Thesis_KUL\\\\memoire_makette\"\"\")"
+    ]
+  }
+}
