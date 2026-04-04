@@ -1,0 +1,250 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ==========================================
+# PARAMETRES PHYSIQUES / DYNAMIQUES
+# ==========================================
+gamma = 1.0   # coefficient dynamique
+# theta_ddot = gamma * u
+
+# ==========================================
+# PARAMETRES DES CONTROLEURS
+# ==========================================
+Kp = 4.0
+Kd = 2.0
+u0 = 0.05   # biais positif
+
+# ==========================================
+# CONDITIONS INITIALES
+# ==========================================
+theta0_deg = 0.0
+theta0 = np.deg2rad(theta0_deg)   # angle initial du bac [rad]
+omega0 = 0.0                      # vitesse angulaire initiale [rad/s]
+
+# ==========================================
+# PARAMETRES DE SIMULATION
+# ==========================================
+dt = 0.001
+t_final = 8.0
+time = np.arange(0, t_final + dt, dt)
+
+# ==========================================
+# CONSIGNE : MUR A VITESSE CONSTANTE
+# jusqu'à 40 deg
+# ==========================================
+psi_dot_const_deg = 5.0
+psi_dot_const = np.deg2rad(psi_dot_const_deg)   # [rad/s]
+
+psi_final_deg = 40.0
+psi_final = np.deg2rad(psi_final_deg)
+
+def psi_t(t):
+    return min(psi_dot_const * t, psi_final)
+
+def psi_dot_t(t):
+    if psi_t(t) < psi_final:
+        return psi_dot_const
+    else:
+        return 0.0
+
+# ==========================================
+# FONCTION DE SIMULATION
+# ==========================================
+def simulate_controller(controller_type="P_bias"):
+    theta = np.zeros_like(time)
+    omega = np.zeros_like(time)
+    psi = np.zeros_like(time)
+    psi_dot = np.zeros_like(time)
+
+    error = np.zeros_like(time)
+    error_dot = np.zeros_like(time)
+
+    u = np.zeros_like(time)
+    alpha_ang = np.zeros_like(time)
+
+    theta[0] = theta0
+    omega[0] = omega0
+    psi[0] = psi_t(time[0])
+    psi_dot[0] = psi_dot_t(time[0])
+
+    # cohérence physique initiale
+    if theta[0] > psi[0]:
+        theta[0] = psi[0]
+
+    for k in range(len(time) - 1):
+        psi[k] = psi_t(time[k])
+        psi_dot[k] = psi_dot_t(time[k])
+
+        # erreur de position
+        error[k] = psi[k] - theta[k]
+        if error[k] < 0:
+            error[k] = 0.0
+
+        # erreur de vitesse
+        error_dot[k] = psi_dot[k] - omega[k]
+
+        # ==========================================
+        # LOI DE COMMANDE
+        # ==========================================
+        if controller_type == "P_bias":
+            u[k] = u0 + Kp * error[k]
+
+        elif controller_type == "P_bias_speed":
+            u[k] = u0 + Kp * error[k] + Kd * max(0.0, error_dot[k])
+
+        else:
+            raise ValueError("controller_type doit être 'P_bias' ou 'P_bias_speed'")
+
+        # commande unilatérale : toujours positive
+        if u[k] < 0:
+            u[k] = 0.0
+
+        # dynamique
+        alpha_ang[k] = gamma * u[k]
+
+        # intégration Euler
+        omega_free = omega[k] + dt * alpha_ang[k]
+        theta_free = theta[k] + dt * omega[k]
+
+        # consigne suivante
+        psi_next = psi_t(time[k + 1])
+        psi_dot_next = psi_dot_t(time[k + 1])
+
+        # contrainte physique : theta <= psi
+        if theta_free > psi_next:
+            theta[k + 1] = psi_next
+
+            # si le bac atteint le mur, on évite une vitesse incohérente
+            omega[k + 1] = min(omega_free, psi_dot_next)
+        else:
+            theta[k + 1] = theta_free
+            omega[k + 1] = omega_free
+
+    # dernier point
+    psi[-1] = psi_t(time[-1])
+    psi_dot[-1] = psi_dot_t(time[-1])
+
+    error[-1] = psi[-1] - theta[-1]
+    if error[-1] < 0:
+        error[-1] = 0.0
+
+    error_dot[-1] = psi_dot[-1] - omega[-1]
+
+    if controller_type == "P_bias":
+        u[-1] = u0 + Kp * error[-1]
+    elif controller_type == "P_bias_speed":
+        u[-1] = u0 + Kp * error[-1] + Kd * max(0.0, error_dot[-1])
+
+    if u[-1] < 0:
+        u[-1] = 0.0
+
+    alpha_ang[-1] = gamma * u[-1]
+
+    return {
+        "theta": theta,
+        "omega": omega,
+        "psi": psi,
+        "psi_dot": psi_dot,
+        "error": error,
+        "error_dot": error_dot,
+        "u": u,
+        "alpha_ang": alpha_ang
+    }
+
+# ==========================================
+# SIMULATIONS
+# ==========================================
+res_P_bias = simulate_controller("P_bias")
+res_P_bias_speed = simulate_controller("P_bias_speed")
+
+# ==========================================
+# RESULTATS NUMERIQUES
+# ==========================================
+def print_results(name, res):
+    print(f"===== {name} =====")
+    print(f"Erreur max [deg] = {np.max(np.rad2deg(res['error'])):.3f}")
+    print(f"Erreur finale [deg] = {np.rad2deg(res['error'][-1]):.3f}")
+    print(f"Commande max = {np.max(res['u']):.3f}")
+    print(f"Commande min = {np.min(res['u']):.3f}")
+    print(f"Vitesse max [deg/s] = {np.max(np.rad2deg(res['omega'])):.3f}")
+    print(f"Accélération max [rad/s²] = {np.max(res['alpha_ang']):.3f}")
+    print()
+
+print("===== PARAMETRES =====")
+print(f"gamma = {gamma}")
+print(f"Kp = {Kp}")
+print(f"Kd = {Kd}")
+print(f"u0 = {u0}")
+print(f"psi_dot = {psi_dot_const_deg} deg/s")
+print(f"psi_final = {psi_final_deg} deg")
+print()
+
+print_results("OPTION 1 : P + biais", res_P_bias)
+print_results("OPTION 2 : P + biais + terme vitesse unilateral", res_P_bias_speed)
+
+# ==========================================
+# AFFICHAGE
+# ==========================================
+plt.figure(figsize=(10, 5))
+plt.plot(time, np.rad2deg(res_P_bias["theta"]), label="theta(t) - P+biais")
+plt.plot(time, np.rad2deg(res_P_bias_speed["theta"]), label="theta(t) - P+biais+vitesse")
+plt.plot(time, np.rad2deg(res_P_bias["psi"]), '--', label="psi(t) : mur")
+plt.xlabel("Temps [s]")
+plt.ylabel("Angle [deg]")
+plt.title("Comparaison des angles")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+
+plt.figure(figsize=(10, 5))
+plt.plot(time, np.rad2deg(res_P_bias["error"]), label="erreur - P+biais")
+plt.plot(time, np.rad2deg(res_P_bias_speed["error"]), label="erreur - P+biais+vitesse")
+plt.xlabel("Temps [s]")
+plt.ylabel("Erreur [deg]")
+plt.title("Comparaison de l'erreur de suivi")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+
+plt.figure(figsize=(10, 5))
+plt.plot(time, res_P_bias["u"], label="u(t) - P+biais")
+plt.plot(time, res_P_bias_speed["u"], label="u(t) - P+biais+vitesse")
+plt.xlabel("Temps [s]")
+plt.ylabel("Commande")
+plt.title("Comparaison des commandes")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+
+plt.figure(figsize=(10, 5))
+plt.plot(time, np.rad2deg(res_P_bias["omega"]), label="omega(t) - P+biais")
+plt.plot(time, np.rad2deg(res_P_bias_speed["omega"]), label="omega(t) - P+biais+vitesse")
+plt.plot(time, np.rad2deg(res_P_bias["psi_dot"]), '--', label="psi_dot(t) : mur")
+plt.xlabel("Temps [s]")
+plt.ylabel("Vitesse angulaire [deg/s]")
+plt.title("Comparaison des vitesses angulaires")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+
+plt.figure(figsize=(10, 5))
+plt.plot(time, alpha := res_P_bias["alpha_ang"], label="theta_ddot(t) - P+biais")
+plt.plot(time, res_P_bias_speed["alpha_ang"], label="theta_ddot(t) - P+biais+vitesse")
+plt.xlabel("Temps [s]")
+plt.ylabel("Accélération angulaire [rad/s²]")
+plt.title("Comparaison des accélérations angulaires")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+
+plt.figure(figsize=(10, 5))
+plt.plot(time, np.rad2deg(res_P_bias["error_dot"]), label="e_dot(t) - P+biais")
+plt.plot(time, np.rad2deg(res_P_bias_speed["error_dot"]), label="e_dot(t) - P+biais+vitesse")
+plt.xlabel("Temps [s]")
+plt.ylabel("Erreur de vitesse [deg/s]")
+plt.title("Comparaison des erreurs de vitesse")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+
+plt.show()
