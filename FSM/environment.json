@@ -1,0 +1,53 @@
+{
+  "image_resolution": {
+    "width": 945,
+    "height": 816
+  },
+  "pixels_per_meter": 823.58,
+  "meters_per_pixel": 0.00121,
+  "calibration_reference": {
+    "description": "side of crate",
+    "real_distance_m": 0.3,
+    "pixel_start": [
+      478,
+      279
+    ],
+    "pixel_end": [
+      724,
+      302
+    ],
+    "pixel_distance": 247.1
+  },
+  "wall_configurations": {
+    "wall_closed": {
+      "origin": [
+        482,
+        188
+      ],
+      "wall1": {
+        "top": [
+          482,
+          188
+        ],
+        "bottom": [
+          448,
+          529
+        ],
+        "length_px": 342.7,
+        "length_m": 0.416
+      },
+      "wall2": {
+        "left": [
+          482,
+          188
+        ],
+        "right": [
+          782,
+          215
+        ],
+        "length_px": 301.2,
+        "length_m": 0.366
+      }
+    }
+  }
+}
