@@ -70,6 +70,7 @@ try:
             aligned, d1, d2, side, side_cm = is_aligned(frame, draw=True)
             print(f"[CHECK_WALL1] d1={d1:.1f}cm d2={d2:.1f}cm "
                   f"côté={side_cm:.1f}cm ({side})")
+            
 
             if aligned:
                 if side == "LONG":
