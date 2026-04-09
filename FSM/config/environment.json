@@ -47,6 +47,14 @@
         ],
         "length_px": 301.2,
         "length_m": 0.366
+      },
+      "approach_point": {
+        "description": "milieu de wall 1, 3cm a droite",
+        "offset_from_wall1_m": 0.03,
+        "pixel": [
+          506,
+          358
+        ]
       }
     }
   }
