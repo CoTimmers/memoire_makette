@@ -1,0 +1,30 @@
+{
+    "path_to_configuration_file_motor_x":
+        "../configuration_files/EL7047_configuration_data.json",
+    "path_to_configuration_file_motor_y": 
+        "../configuration_files/EL7047_configuration_data.json",
+    "path_to_configuration_file_motor_z": 
+        "../configuration_files/EPOS_configuration_data.json",
+
+    "path_to_configuration_file_encoder": 
+        "../configuration_files/EL5102_configuration_data.json",
+
+    "ifname": "enx606d3cf2b339",
+    
+    "FSM_schedule": "gantry",
+
+    "motor_x_number_in_chain": 1,
+    "motor_y_number_in_chain": 2,
+
+    "RT_thread_cycletime": 2000000,
+    "RT_sync_jitter": 500,
+
+    "attach_position_x": 50.0,
+    "attach_position_y": 50.0,
+    "attach_position_z": 0.0,
+
+    "correction_step_mm": 10.0,
+
+    "steady_state_threshold_px": 5.0,
+    "steady_state_n_frames": 10
+}
