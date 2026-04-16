@@ -422,5 +422,154 @@ namespace IP{
 
 //     /* <\ImageProcessingData> */
 
+    /* ------------------------------------------------------------------ */
+    /* detect_green_marker_centre                                           */
+    /*                                                                      */
+    /* Detects the green square marker in the image and returns its centre. */
+    /*                                                                      */
+    /* Parameters:                                                          */
+    /*   input_frame  — BGR image from camera                               */
+    /*   centre       — output: pixel coordinates of green marker centre    */
+    /*                                                                      */
+    /* Returns 1 if marker found, 0 if not found.                          */
+    /* ------------------------------------------------------------------ */
+    int detect_green_marker_centre(cv::Mat input_frame, cv::Point *centre)
+    {
+        /* Step 1 — Convert to HSV and threshold for green */
+        /* Tune these values if lighting changes:
+           Hue 40-80 covers most greens
+           Saturation > 80 excludes grey/white
+           Value > 80 excludes dark areas */
+        cv::Scalar lower_green(40, 80, 80);
+        cv::Scalar upper_green(80, 255, 255);
+
+        cv::Mat green_mask;
+        colour_detection_hsv(input_frame, &green_mask, lower_green, upper_green);
+
+        /* Step 2 — Blur to remove noise */
+        cv::Mat blurred;
+        median_blur_filter(green_mask, &blurred, 5);
+
+        /* Step 3 — Calculate centre of green region */
+        double area;
+        const double MIN_GREEN_AREA = 200.0;  // minimum pixels to be a valid marker
+        if(calculate_centre_point_and_area(blurred, centre, &area, MIN_GREEN_AREA) != 1)
+        {
+            return 0;  // marker not found
+        }
+
+        return 1;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* detect_bac_contour                                                   */
+    /*                                                                      */
+    /* Finds the red rectangular contour that contains the green marker.   */
+    /* This identifies the correct bac when multiple red objects exist.    */
+    /*                                                                      */
+    /* Parameters:                                                          */
+    /*   input_frame    — BGR image from camera                             */
+    /*   marker_centre  — centre of green marker (from detect_green_marker) */
+    /*   corners        — output: 4 corner points of the bac contour        */
+    /*                    ordered: top-left, top-right, bottom-right,       */
+    /*                             bottom-left                              */
+    /*                                                                      */
+    /* Returns 1 if bac found, 0 if not found.                             */
+    /* ------------------------------------------------------------------ */
+    int detect_bac_contour(cv::Mat input_frame, cv::Point marker_centre,
+                           std::vector<cv::Point> *corners)
+    {
+        /* Step 1 — Threshold for red
+           Calibrated on real Stella Artois bac under lab lighting.
+           The red splits across both ends of the HSV hue circle:
+             - low red  : hue 0-15   (~5900 pixels sampled)
+             - high red : hue 165-180 (~11000 pixels sampled)
+           Saturation minimum 150 (mean ~230 on real bac).
+           Value minimum 80 to handle shadowed areas. */
+        cv::Scalar lower_red1(0,   150, 80);
+        cv::Scalar upper_red1(15,  255, 255);
+        cv::Scalar lower_red2(165, 150, 80);
+        cv::Scalar upper_red2(180, 255, 255);
+
+        cv::Mat red_mask1, red_mask2, red_mask;
+        colour_detection_hsv(input_frame, &red_mask1, lower_red1, upper_red1);
+        colour_detection_hsv(input_frame, &red_mask2, lower_red2, upper_red2);
+        cv::bitwise_or(red_mask1, red_mask2, red_mask);
+
+        /* Step 2 — Blur to remove noise */
+        cv::Mat blurred;
+        median_blur_filter(red_mask, &blurred, 5);
+
+        /* Step 3 — Find all contours in the red mask */
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(blurred, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+        if(contours.empty())
+        {
+            std::cout << "[detect_bac_contour] Aucun contour rouge trouvé." << std::endl;
+            return 0;
+        }
+
+        /* Step 4 — Find the contour that contains the green marker centre */
+        for(auto &contour : contours)
+        {
+            /* Skip contours that are too small to be a bac */
+            double area = cv::contourArea(contour);
+            if(area < 5000.0)  // tune this threshold based on your camera height
+                {continue;}
+
+            /* Check if marker centre is inside this contour */
+            double inside = cv::pointPolygonTest(contour, cv::Point2f(marker_centre), false);
+            if(inside < 0)
+                {continue;}  // marker not inside this contour
+
+            /* Step 5 — Approximate contour to a rectangle (4 corners) */
+            std::vector<cv::Point> approx;
+            double epsilon = 0.02 * cv::arcLength(contour, true);
+            cv::approxPolyDP(contour, approx, epsilon, true);
+
+            /* We expect 4 corners for a rectangle */
+            if(approx.size() != 4)
+            {
+                /* If approxPolyDP doesn't give exactly 4, use bounding rotated rect */
+                cv::RotatedRect rect = cv::minAreaRect(contour);
+                cv::Point2f rect_points[4];
+                rect.points(rect_points);
+
+                corners->clear();
+                for(int i = 0; i < 4; i++)
+                    {corners->push_back(cv::Point(rect_points[i]));}
+            }
+            else
+            {
+                *corners = approx;
+            }
+
+            /* Order corners: top-left, top-right, bottom-right, bottom-left */
+            /* Sort by Y first (top vs bottom), then by X (left vs right) */
+            std::sort(corners->begin(), corners->end(),
+                [](const cv::Point &a, const cv::Point &b)
+                    {return a.y < b.y;});
+
+            /* Top two points — sort by X */
+            if((*corners)[0].x > (*corners)[1].x)
+                {std::swap((*corners)[0], (*corners)[1]);}
+            /* Bottom two points — sort by X */
+            if((*corners)[2].x > (*corners)[3].x)
+                {std::swap((*corners)[3], (*corners)[2]);}
+
+            std::cout << "[detect_bac_contour] Bac trouvé. Coins:" << std::endl;
+            std::cout << "  top-left     : " << (*corners)[0] << std::endl;
+            std::cout << "  top-right    : " << (*corners)[1] << std::endl;
+            std::cout << "  bottom-right : " << (*corners)[2] << std::endl;
+            std::cout << "  bottom-left  : " << (*corners)[3] << std::endl;
+
+            return 1;
+        }
+
+        std::cout << "[detect_bac_contour] Aucun bac rouge contenant le marqueur." << std::endl;
+        return 0;
+    }
+
 } // namespace IP
 

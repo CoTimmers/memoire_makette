@@ -172,7 +172,9 @@ namespace activity_5c
         discrete_state->ETHERCAT_RUNNING = 0;
         discrete_state->RT_SYNCED = 0;
 
-        discrete_state->HOMING_COMPLETE = 0;
+        discrete_state->OPERATOR_COMPLETE  = 0;
+        discrete_state->SCANNING_COMPLETE   = 0;
+        discrete_state->gantry_state         = GANTRY_HOMING;
         
         activity->state.lcsm_flags.creation_complete = true;
     }
@@ -493,6 +495,22 @@ namespace activity_5c
         continuous_state->RT_ts = new struct timespec;
         
         continuous_state->execute_task_function = &ARNOLD::do_nothing;
+        continuous_state->execute_FSM           = &ARNOLD::gantry_FSM;
+
+        continuous_state->marker_pixel_x           = 0.0;
+        continuous_state->marker_pixel_y           = 0.0;
+        continuous_state->marker_detected          = false;
+        continuous_state->marker_prev_pixel_x      = 0.0;
+        continuous_state->marker_prev_pixel_y      = 0.0;
+        continuous_state->steady_state_frame_count = 0;
+        continuous_state->wall_aligned             = false;
+        continuous_state->target_x                 = 0.0;
+        continuous_state->target_y                 = 0.0;
+
+        params->attach_position_x          = 50.0;
+        params->attach_position_y          = 50.0;
+        params->steady_state_threshold_px  = 5.0;
+        params->steady_state_n_frames      = 60;
 
         /* Link to activity struct if it is used outside of this */
         activity->conf.params = (params_t*) params;
@@ -547,6 +565,15 @@ namespace activity_5c
         param_array[number_of_params++] = (param_array_t){"RT_sync_jitter", 
             &(params->RT_sync_jitter), PARAM_TYPE_INT};
 
+        param_array[number_of_params++] = (param_array_t){"attach_position_x", 
+            &(params->attach_position_x), PARAM_TYPE_DOUBLE, OPTIONAL_PARAMETER};
+        param_array[number_of_params++] = (param_array_t){"attach_position_y", 
+            &(params->attach_position_y), PARAM_TYPE_DOUBLE, OPTIONAL_PARAMETER};
+        param_array[number_of_params++] = (param_array_t){"steady_state_threshold_px", 
+            &(params->steady_state_threshold_px), PARAM_TYPE_DOUBLE, OPTIONAL_PARAMETER};
+        param_array[number_of_params++] = (param_array_t){"steady_state_n_frames", 
+            &(params->steady_state_n_frames), PARAM_TYPE_INT, OPTIONAL_PARAMETER};
+
         // generic reader function
         int config_status_activity;
 
@@ -559,10 +586,11 @@ namespace activity_5c
             {*status = CONFIGURATION_FROM_FILE_FAILED;}
 
         /* Setup FSM */
-        if(strcmp(params->FSM_schedule, "homing") == 0)
+        if(strcmp(params->FSM_schedule, "gantry") == 0)
+            {continuous_state->execute_FSM = &ARNOLD::gantry_FSM;}
+        else if(strcmp(params->FSM_schedule, "homing") == 0)
             {continuous_state->execute_FSM = &ARNOLD::homing_FSM;}
         else
             {*status = CONFIGURATION_FROM_FILE_FAILED;}
     }
 }
-
