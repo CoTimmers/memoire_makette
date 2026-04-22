@@ -258,7 +258,7 @@ def plot_profile(profile: dict) -> None:
 
 if __name__ == "__main__":
     # ===== USER INPUT =====
-    D = 1.0              # distance to travel [m]
+    D = 0.10              # distance to travel [m]
     v_max = 0.1          # maximum velocity [m/s]
     theta_lim_deg = 4.0  # maximum sway angle [deg]
     zeta = 0.02          # damping ratio
