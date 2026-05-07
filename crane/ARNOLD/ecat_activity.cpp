@@ -175,8 +175,23 @@ namespace activity_5c
         continuous_state->target_x = 0.0;
         continuous_state->target_y = 0.0;
 
-        /* Velocity profile */
-        continuous_state->v_ref_prev = 0.0;
+        /* Trajectory planning */
+        continuous_state->trajectory_planned = false;
+        continuous_state->t_start       = 0.0;
+        continuous_state->x0            = 0.0;
+        continuous_state->y0            = 0.0;
+        continuous_state->a_x           = 0.0;
+        continuous_state->v_peak_x      = 0.0;
+        continuous_state->t1_x          = 0.0;
+        continuous_state->t2_x          = 0.0;
+        continuous_state->tf_x          = 0.0;
+        continuous_state->trapezoidal_x = false;
+        continuous_state->a_y           = 0.0;
+        continuous_state->v_peak_y      = 0.0;
+        continuous_state->t1_y          = 0.0;
+        continuous_state->t2_y          = 0.0;
+        continuous_state->tf_y          = 0.0;
+        continuous_state->trapezoidal_y = false;
 
         /* Camera / marker */
         continuous_state->marker_pixel_x      = 0.0;
@@ -530,29 +545,33 @@ namespace activity_5c
         param_array[number_of_params++] = (param_array_t){"RT_sync_jitter", 
             &(params->RT_sync_jitter), PARAM_TYPE_INT};
 
-        /* Steady state detection (slide 5) */
         param_array[number_of_params++] = (param_array_t){"steady_state_threshold_px",
             &(params->steady_state_threshold_px), PARAM_TYPE_DOUBLE};
         param_array[number_of_params++] = (param_array_t){"steady_state_n_frames",
             &(params->steady_state_n_frames), PARAM_TYPE_INT};
 
-        /* Velocity profile + position feedback (slides 3 & 4) */
         param_array[number_of_params++] = (param_array_t){"L_cable",
             &(params->L_cable), PARAM_TYPE_DOUBLE};
+        param_array[number_of_params++] = (param_array_t){"zeta",
+            &(params->zeta), PARAM_TYPE_DOUBLE};
         param_array[number_of_params++] = (param_array_t){"v_max",
             &(params->v_max), PARAM_TYPE_DOUBLE};
-        param_array[number_of_params++] = (param_array_t){"kp_position",
-            &(params->kp_position), PARAM_TYPE_DOUBLE};
-        param_array[number_of_params++] = (param_array_t){"dt",
-            &(params->dt), PARAM_TYPE_DOUBLE};
-        param_array[number_of_params++] = (param_array_t){"epsilon_x",
-            &(params->epsilon_x), PARAM_TYPE_DOUBLE};
-        param_array[number_of_params++] = (param_array_t){"epsilon_v",
-            &(params->epsilon_v), PARAM_TYPE_DOUBLE};
 
-        /* Target correction (slide 7) */
         param_array[number_of_params++] = (param_array_t){"correction_step_mm",
             &(params->correction_step_mm), PARAM_TYPE_DOUBLE};
+
+        param_array[number_of_params++] = (param_array_t){"frame_height_px",
+            &(params->frame_height_px), PARAM_TYPE_DOUBLE};
+        param_array[number_of_params++] = (param_array_t){"epsilon_crate_tol_px",
+            &(params->epsilon_crate_tol_px), PARAM_TYPE_DOUBLE};
+        param_array[number_of_params++] = (param_array_t){"kp_camera",
+            &(params->kp_camera), PARAM_TYPE_DOUBLE};
+        param_array[number_of_params++] = (param_array_t){"x_wall_px",
+            &(params->x_wall_px), PARAM_TYPE_DOUBLE};
+        param_array[number_of_params++] = (param_array_t){"epsilon_wall_px",
+            &(params->epsilon_wall_px), PARAM_TYPE_DOUBLE};
+        param_array[number_of_params++] = (param_array_t){"D_threshold_px",
+            &(params->D_threshold_px), PARAM_TYPE_DOUBLE};
 
         int config_status_activity;
         read_from_input_file(file_path, param_array, number_of_params, &config_status_activity);
@@ -562,7 +581,6 @@ namespace activity_5c
         else
             {*status = CONFIGURATION_FROM_FILE_FAILED;}
 
-        /* Setup FSM — deux schedules possibles */
         if(strcmp(params->FSM_schedule, "homing") == 0)
             {continuous_state->execute_FSM = &ARNOLD::homing_FSM;}
         else if(strcmp(params->FSM_schedule, "gantry") == 0)

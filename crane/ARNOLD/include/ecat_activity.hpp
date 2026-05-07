@@ -58,25 +58,25 @@ namespace activity_5c
             int RT_thread_cycletime;
             int RT_sync_jitter;
 
-            /* Operator / attach position */
-            double attach_position_x;       // [mm]
-            double attach_position_y;       // [mm]
-            double attach_position_z;       // [mm]
-
-            /* Steady state detection (slide 5) */
-            double steady_state_threshold_px;   // epsilon_d en pixels
+            /* Steady state detection */
+            double steady_state_threshold_px;   // epsilon_d  [pixels]
             int    steady_state_n_frames;        // nombre de frames consécutives (≥60 @ 30fps)
 
-            /* Velocity profile + position feedback (slides 3 & 4) */
-            double L_cable;         // longueur câble [m], ≈ 2.2
-            double v_max;           // vitesse max [mm/s]
-            double kp_position;     // gain proportionnel erreur → v_ref
-            double dt;              // période d'échantillonnage [s]
-            double epsilon_x;       // tolérance position [mm]
-            double epsilon_v;       // tolérance vitesse [mm/s]
+            /* Trajectory generation — input shaping */
+            double L_cable;         // [m]
+            double zeta;            // [-]
+            double v_max;           //  [mm/s]
 
-            /* Target correction (slide 7) */
-            double correction_step_mm;  // pas de correction vers le mur [mm], default 20mm
+            /* Target correction */
+            double correction_step_mm;  // pas de correction [mm]
+
+            double frame_height_px;       // hauteur du frame caméra [px] (= b)
+            double epsilon_crate_tol_px;  // tolérance alignement caméra [px]
+            double kp_camera;             // gain discret: Delta_x = kp_camera * e_crate
+
+            double x_wall_px;             // position x du mur 1 [px] (calibré manuellement)
+            double epsilon_wall_px;       // seuil contact coin-mur [px]
+            double D_threshold_px;        // seuil long/court côté [px] (~35cm en pixels)
 
         } params_t;
 
@@ -89,9 +89,7 @@ namespace activity_5c
             GANTRY_MOVING               = 3,
             GANTRY_CHECK_ALIGNMENT      = 4,
             GANTRY_ADJUST_POSITION      = 5,
-            GANTRY_FINAL_POSITIONING    = 6,
-            GANTRY_CORNERING            = 7,
-            GANTRY_DONE                 = 8
+            GANTRY_DONE                 = 6
         } gantry_state_t;
 
         /* (Computational) continuous state */
@@ -112,15 +110,32 @@ namespace activity_5c
             double target_x;    // [mm]
             double target_y;    // [mm]
 
-            /* Velocity profile state (slides 3 & 4) */
-            double v_ref_prev;  // v_ref du cycle précédent pour limitation a_max
+            /* Trajectory planning */
+            bool   trajectory_planned;
+            double t_start;         // temps absolu début du mouvement [s]
+            double x0;              // position X au début du mouvement [mm]
+            double y0;              // position Y au début du mouvement [mm]
 
-            /* Camera data — written by camera thread, read by FSM */
+            double a_x;             // accélération axe X [mm/s²]
+            double v_peak_x;        // vitesse pic axe X [mm/s]
+            double t1_x;            // fin phase accél X [s]
+            double t2_x;            // début phase décel X [s]
+            double tf_x;            // fin du mouvement X [s]
+            bool   trapezoidal_x;   // true = trapèze, false = triangle
+
+            double a_y;             // accélération axe Y [mm/s²]
+            double v_peak_y;        // vitesse pic axe Y [mm/s]
+            double t1_y;            // fin phase accél Y [s]
+            double t2_y;            // début phase décel Y [s]
+            double tf_y;            // fin du mouvement Y [s]
+            bool   trapezoidal_y;   // true = trapèze, false = triangle
+
+            /* Camera data — written by camera thread */
             double marker_pixel_x;
             double marker_pixel_y;
             bool   marker_detected;
 
-            /* Steady state detection (slide 5) */
+            /* Steady state detection */
             double marker_prev_pixel_x;
             double marker_prev_pixel_y;
             int    steady_state_frame_count;
@@ -142,18 +157,15 @@ namespace activity_5c
             uint HOMING_COMPLETE        : 1;
 
             /* External signals */
-            uint OPERATOR_COMPLETE      : 1;    // mis à 1 par l'opérateur (touche Enter)
+            uint OPERATOR_COMPLETE      : 1;    // by pressing 'enter
 
-            /* Adjustment loop flag —
-             * mis à 1 par check_alignment quand FLAG_ALIGNED == 0
-             * pour que waiting_steady_state retourne à CHECK_ALIGNMENT
-             * et non à MOVING après stabilisation */
+            /* mis à 1 par check_alignment après correction caméra
+             * pour que waiting_steady_state retourne à CHECK_ALIGNMENT */
             uint COMING_FROM_ADJUSTMENT : 1;
 
-            /* Alignment flag (slide 6)
-             * 0 = aucun côté aligné
-             * 1 = côté long aligné  → GANTRY_FINAL_POSITIONING
-             * 2 = côté court aligné → GANTRY_CORNERING          */
+            /* Alignment flag
+             * 0 = non aligné
+             * 1 = aligné → GANTRY_DONE          */
             int FLAG_ALIGNED;
 
             /* Main FSM state */
