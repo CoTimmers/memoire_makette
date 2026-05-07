@@ -63,10 +63,6 @@ namespace ARNOLD{
             {ecat_activity->continuous_state->execute_task_function = &check_alignment;}
         else if(ecat_activity->discrete_state->gantry_state == activity_5c::ECATActivity::GANTRY_ADJUST_POSITION)
             {ecat_activity->continuous_state->execute_task_function = &adjust_position;}
-        else if(ecat_activity->discrete_state->gantry_state == activity_5c::ECATActivity::GANTRY_FINAL_POSITIONING)
-            {ecat_activity->continuous_state->execute_task_function = &final_positioning;}
-        else if(ecat_activity->discrete_state->gantry_state == activity_5c::ECATActivity::GANTRY_CORNERING)
-            {ecat_activity->continuous_state->execute_task_function = &cornering;}
         else if(ecat_activity->discrete_state->gantry_state == activity_5c::ECATActivity::GANTRY_DONE)
             {ecat_activity->continuous_state->execute_task_function = &done;}
 

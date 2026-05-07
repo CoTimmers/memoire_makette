@@ -61,7 +61,7 @@ void operator_thread(activity_5c::ECATActivity* ecat_activity)
     {
         if(ecat_activity->discrete_state->gantry_state == activity_5c::ECATActivity::GANTRY_WAITING_OPERATOR)
         {
-            cout << "Attach crate to hook and press Enter..." << endl;
+            cout << "Attach crate to hook and press Enter" << endl;
             cin.get();
             ecat_activity->discrete_state->OPERATOR_COMPLETE = 1;
         }
@@ -97,19 +97,49 @@ void camera_thread(activity_5c::ECATActivity* ecat_activity)
             ecat_activity->continuous_state->marker_pixel_y = marker_centre.y;
         }
 
-        /* Detect bac contour and check alignment */
-        if(ecat_activity->discrete_state->gantry_state == activity_5c::ECATActivity::GANTRY_CHECK_ALIGNMENT)
+        if(ecat_activity->discrete_state->gantry_state ==
+           activity_5c::ECATActivity::GANTRY_CHECK_ALIGNMENT)
         {
-            if(detected == 1)
-            {
-                vector<cv::Point> corners;
-                int bac_found = IP::detect_bac_contour(frame, marker_centre, &corners);
+            cv::Mat hsv;
+            cv::cvtColor(frame, hsv, cv::COLOR_BGR2HSV);
 
-                if(bac_found == 1)
+            cv::Mat mask1, mask2, mask_red;
+            cv::inRange(hsv, cv::Scalar(0,   100, 100), cv::Scalar(10,  255, 255), mask1);
+            cv::inRange(hsv, cv::Scalar(160, 100, 100), cv::Scalar(180, 255, 255), mask2);
+            cv::bitwise_or(mask1, mask2, mask_red);
+
+            vector<vector<cv::Point>> contours;
+            cv::findContours(mask_red, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+            ecat_activity->discrete_state->FLAG_ALIGNED = 0;
+
+            if(!contours.empty())
+            {
+                int largest = 0;
+                for(int i = 1; i < (int)contours.size(); i++)
+                    if(cv::contourArea(contours[i]) > cv::contourArea(contours[largest]))
+                        largest = i;
+
+                cv::RotatedRect rect = cv::minAreaRect(contours[largest]);
+                cv::Point2f corners[4];
+                rect.points(corners);
+
+                double x_wall   = ecat_activity->params->x_wall_px;
+                double eps_wall = ecat_activity->params->epsilon_wall_px;
+
+                vector<cv::Point2f> wall_corners;
+                for(int i = 0; i < 4; i++)
                 {
-                    /* TODO: compare corners with hardcoded wall position */
-                    /* Waiting for pixels/mm calibration */
-                    ecat_activity->continuous_state->wall_aligned = 0;
+                    if(fabs(corners[i].x - x_wall) <= eps_wall)
+                        wall_corners.push_back(corners[i]);
+                }
+
+                if(wall_corners.size() >= 2)
+                {
+                    double D = sqrt(pow(wall_corners[0].x - wall_corners[1].x, 2.0) +
+                                    pow(wall_corners[0].y - wall_corners[1].y, 2.0));
+                    (void)D;
+                    ecat_activity->discrete_state->FLAG_ALIGNED = 1;
                 }
             }
         }
