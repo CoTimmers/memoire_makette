@@ -17,7 +17,7 @@
     "RT_sync_jitter": 500,
 
     "steady_state_threshold_px": 2.0,
-    "steady_state_n_frames": 60,
+    "camera_fps": 160.0,
 
     "L_cable": 2.2,
     "zeta": 0.1,
@@ -25,7 +25,8 @@
 
     "correction_step_mm": 20.0,
 
-    "frame_height_px": 480.0,
+    "x_ref_px": 0.0,
+    "y_ref_px": 0.0,
     "epsilon_crate_tol_px": 10.0,
     "kp_camera": 0.5,
 

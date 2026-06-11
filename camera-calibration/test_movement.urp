@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<urProgram version="5.0.0.0" name="test_movement" createdIn="5.0.0.0" lastSavedIn="5.0.0.0" directory="">
+  <robot>
+    <program>
+      <children>
+        <MoveL>
+          <motionParameters>
+            <velocity>0.1</velocity>
+            <acceleration>0.5</acceleration>
+            <blendRadius>0</blendRadius>
+          </motionParameters>
+          <children>
+
+            <Waypoint name="point_depart" type="Fixed">
+              <motionParameters/>
+              <position>
+                <Pose referencedFeature="base">
+                  <x>-0.500</x>
+                  <y>-0.500</y>
+                  <z>0.500</z>
+                  <rx>3.14159</rx>
+                  <ry>0.0</ry>
+                  <rz>0.0</rz>
+                </Pose>
+              </position>
+            </Waypoint>
+
+            <Waypoint name="point_arrivee" type="Fixed">
+              <motionParameters/>
+              <position>
+                <Pose referencedFeature="base">
+                  <x>0.674</x>
+                  <y>-0.018</y>
+                  <z>0.500</z>
+                  <rx>3.14159</rx>
+                  <ry>0.0</ry>
+                  <rz>0.0</rz>
+                </Pose>
+              </position>
+            </Waypoint>
+
+          </children>
+        </MoveL>
+      </children>
+    </program>
+  </robot>
+</urProgram>

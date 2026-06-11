@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<installation version="5.0.0.0">
+  <robot>
+
+    <!-- TCP : outil par defaut (pas de decalage) -->
+    <tcp>
+      <selectedTCP name="Defaut"/>
+      <tcpList>
+        <tcp name="Defaut">
+          <x>0.0</x>
+          <y>0.0</y>
+          <z>0.0</z>
+          <rx>0.0</rx>
+          <ry>0.0</ry>
+          <rz>0.0</rz>
+        </tcp>
+      </tcpList>
+    </tcp>
+
+    <!-- Charge utile -->
+    <payload>
+      <mass>0.0</mass>
+      <cog>
+        <x>0.0</x>
+        <y>0.0</y>
+        <z>0.0</z>
+      </cog>
+    </payload>
+
+    <!-- Repere de reference : base du robot -->
+    <features>
+      <feature name="base" type="base">
+        <x>0.0</x>
+        <y>0.0</y>
+        <z>0.0</z>
+        <rx>0.0</rx>
+        <ry>0.0</ry>
+        <rz>0.0</rz>
+      </feature>
+    </features>
+
+    <!-- Vitesse et acceleration globales (ratio 0-1) -->
+    <speedSlider>
+      <speed>0.25</speed>
+    </speedSlider>
+
+    <!-- Gravite : Z vers le bas (robot monte sur table) -->
+    <gravity>
+      <x>0.0</x>
+      <y>0.0</y>
+      <z>9.82</z>
+    </gravity>
+
+  </robot>
+</installation>

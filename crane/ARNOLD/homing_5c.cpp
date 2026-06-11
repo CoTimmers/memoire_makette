@@ -75,9 +75,9 @@ void camera_thread(activity_5c::ECATActivity* ecat_activity)
     if(!cap.isOpened())
         {return;}
 
-    /* HSV thresholds for green marker */
-    cv::Scalar lower_green(40, 80, 80);
-    cv::Scalar upper_green(80, 255, 255);
+    cap.set(cv::CAP_PROP_FRAME_WIDTH,  1920);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, 1200);
+    cap.set(cv::CAP_PROP_FPS,          160);
 
     while(execute_application_thread)
     {
@@ -144,7 +144,7 @@ void camera_thread(activity_5c::ECATActivity* ecat_activity)
             }
         }
 
-        usleep(33000);  // ~30 fps
+        usleep(6250);   // ~160 fps
     }
 
     cap.release();

@@ -547,8 +547,8 @@ namespace activity_5c
 
         param_array[number_of_params++] = (param_array_t){"steady_state_threshold_px",
             &(params->steady_state_threshold_px), PARAM_TYPE_DOUBLE};
-        param_array[number_of_params++] = (param_array_t){"steady_state_n_frames",
-            &(params->steady_state_n_frames), PARAM_TYPE_INT};
+        param_array[number_of_params++] = (param_array_t){"camera_fps",
+            &(params->camera_fps), PARAM_TYPE_DOUBLE};
 
         param_array[number_of_params++] = (param_array_t){"L_cable",
             &(params->L_cable), PARAM_TYPE_DOUBLE};
@@ -560,8 +560,10 @@ namespace activity_5c
         param_array[number_of_params++] = (param_array_t){"correction_step_mm",
             &(params->correction_step_mm), PARAM_TYPE_DOUBLE};
 
-        param_array[number_of_params++] = (param_array_t){"frame_height_px",
-            &(params->frame_height_px), PARAM_TYPE_DOUBLE};
+        param_array[number_of_params++] = (param_array_t){"x_ref_px",
+            &(params->x_ref_px), PARAM_TYPE_DOUBLE};
+        param_array[number_of_params++] = (param_array_t){"y_ref_px",
+            &(params->y_ref_px), PARAM_TYPE_DOUBLE};
         param_array[number_of_params++] = (param_array_t){"epsilon_crate_tol_px",
             &(params->epsilon_crate_tol_px), PARAM_TYPE_DOUBLE};
         param_array[number_of_params++] = (param_array_t){"kp_camera",

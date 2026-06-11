@@ -59,8 +59,8 @@ namespace activity_5c
             int RT_sync_jitter;
 
             /* Steady state detection */
-            double steady_state_threshold_px;   // epsilon_d  [pixels]
-            int    steady_state_n_frames;        // nombre de frames consécutives (≥60 @ 30fps)
+            double steady_state_threshold_px;   // epsilon_d [pixels]
+            double camera_fps;                  // fps caméra (N calculé = ceil(T * fps))
 
             /* Trajectory generation — input shaping */
             double L_cable;         // [m]
@@ -70,7 +70,8 @@ namespace activity_5c
             /* Target correction */
             double correction_step_mm;  // pas de correction [mm]
 
-            double frame_height_px;       // hauteur du frame caméra [px] (= b)
+            double x_ref_px;              // position x de référence dans l'image [px]
+            double y_ref_px;              // position y de référence dans l'image [px]
             double epsilon_crate_tol_px;  // tolérance alignement caméra [px]
             double kp_camera;             // gain discret: Delta_x = kp_camera * e_crate
 

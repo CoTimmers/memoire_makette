@@ -211,8 +211,13 @@ namespace ARNOLD{
         else
             {ecat_activity->continuous_state->steady_state_frame_count = 0;}
 
-        if(ecat_activity->continuous_state->steady_state_frame_count
-           >= ecat_activity->params->steady_state_n_frames)
+        // N >= 2π * sqrt(L/g) * fps  (au moins une période complète)
+        const double g = 9.81;
+        const double L = ecat_activity->params->L_cable;
+        const double T = 2.0 * M_PI * sqrt(L / g);
+        int N = (int)ceil(T * ecat_activity->params->camera_fps);
+
+        if(ecat_activity->continuous_state->steady_state_frame_count >= N)
         {
             ecat_activity->continuous_state->steady_state_frame_count = 0;
 
@@ -409,8 +414,11 @@ namespace ARNOLD{
         if(!ecat_activity->continuous_state->marker_detected)
             return;
 
-        double y_ref   = ecat_activity->params->frame_height_px / 2.0;
+        double x_ref   = ecat_activity->params->x_ref_px;
+        double y_ref   = ecat_activity->params->y_ref_px;
+        double x_cam   = ecat_activity->continuous_state->marker_pixel_x;
         double y_cam   = ecat_activity->continuous_state->marker_pixel_y;
+        (void)x_ref; (void)x_cam;
         double e_crate = y_ref - y_cam;
 
         if(fabs(e_crate) <= ecat_activity->params->epsilon_crate_tol_px)
