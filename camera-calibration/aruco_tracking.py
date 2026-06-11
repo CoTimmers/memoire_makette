@@ -301,8 +301,8 @@ def main():
                 if ref_tvec is not None:
                     pos_rel, euler_rel = relative_pose(tvec, rvec, ref_tvec, ref_rvec)
                     # Rouge(X camera)=Mur2=y_these, Vert(Y camera)=Mur1=x_these
-                    x_c = pos_rel[1]   # vert  (Y camera) → x du mémoire (Wall 1)
-                    y_c = pos_rel[0]   # rouge (X camera) → y du mémoire (Wall 2)
+                    x_c = -pos_rel[0]   # rouge  (Y camera) → x du mémoire (Wall 1)
+                    y_c = pos_rel[1]   # vert (X camera) → y du mémoire (Wall 2)
                     theta_c  = euler_rel[2]  # yaw = rotation in plane
                     vx_c = vel[0]    if vel     is not None else 0.0
                     vy_c = vel[1]    if vel     is not None else 0.0
