@@ -1,0 +1,52 @@
+"Prends le fichier CSV genere par le test de pendule libre (etat_bac.py) et trace les angles et longueurs mesures."
+"Calcule la periode et l'amortissement naturel du pendule, ainsi que la moyenne et l'ecart-type de la longueur mesuree." 
+"Sauvegarde la figure sous 'validation_camera.png'."
+
+
+import sys
+import numpy as np
+import matplotlib.pyplot as plt
+ 
+fichier = sys.argv[1] if len(sys.argv) > 1 else "logs/dernier.csv"
+data = np.genfromtxt(fichier, delimiter=",", names=True)
+t  = data["t"] - data["t"][0]
+th = np.degrees(data["theta_rad"])
+lm = data["l_meas"]
+ 
+# --- Periode : detection des passages par zero (montants) ---
+s = np.sign(th - np.mean(th))
+croisements = t[1:][(s[:-1] < 0) & (s[1:] > 0)]
+if len(croisements) >= 2:
+    periodes = np.diff(croisements)
+    T_mes = np.mean(periodes)
+    print(f"Periode mesuree : {T_mes:.3f} s (theorie 1.554 s, ecart {100*(T_mes/1.554-1):+.1f} %)")
+    print(f"  -> longueur equivalente l = g*(T/2pi)^2 = {9.81*(T_mes/(2*np.pi))**2:.3f} m")
+else:
+    print("Pas assez d'oscillations detectees.")
+ 
+# --- Amortissement : decrement logarithmique sur les pics positifs ---
+pics = [i for i in range(1, len(th)-1) if th[i] > th[i-1] and th[i] > th[i+1] and th[i] > 1.0]
+if len(pics) >= 3:
+    N = len(pics) - 1
+    delta = np.log(th[pics[0]] / th[pics[-1]]) / N
+    zeta = delta / np.sqrt(4*np.pi**2 + delta**2)
+    print(f"Amortissement naturel estime : zeta = {zeta:.5f} (sur {N} periodes)")
+ 
+# --- Sante de la mesure ---
+print(f"Longueur mesuree : moyenne {np.mean(lm):.3f} m, ecart-type {1000*np.std(lm):.1f} mm")
+dt = np.diff(t)
+print(f"Cadence : {1/np.mean(dt):.1f} Hz, pire trou entre 2 frames : {1000*np.max(dt):.0f} ms")
+ 
+# --- Traces ---
+fig, ax = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
+ax[0].plot(t, th, lw=0.9)
+ax[0].set_ylabel("theta [deg]"); ax[0].grid(alpha=.3)
+ax[0].set_title("Pendule libre : validation de la mesure camera")
+ax[1].plot(t, lm, lw=0.9, color="tab:orange")
+ax[1].axhline(0.60, color="gray", ls=":")
+ax[1].set_ylabel("l mesuree [m]"); ax[1].set_xlabel("t [s]"); ax[1].grid(alpha=.3)
+plt.tight_layout()
+plt.savefig("validation_camera.png", dpi=130)
+plt.show()
+print("Figure sauvegardee : validation_camera.png")
+ 

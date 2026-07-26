@@ -1,0 +1,222 @@
+"Envoie la consigne de vitesse au UR10 pour amortir les oscillations du bac."
+"Le controleur est base sur un modele lineaire du pendule, avec placement de poles."
+
+
+import numpy as np
+import time
+import csv
+import os
+ 
+# ============================ CONFIG ============================
+ 
+SIMULATION = True                 # <<< False le jour du banc
+ 
+# --- Physique / controleur (l = 0.60 m) ---
+G       = 9.81
+L_CABLE = 0.60
+K       = np.array([1.000, 2.346, -6.793, -3.189])   # calcule au placement de poles
+X_REF   = 0.50                    # deplacement demande [m]
+ 
+# --- Cadences ---
+DT      = 0.008                   # boucle de controle [s] (125 Hz, UR10 CB3)
+DT_CAM  = 1/60                    # rafraichissement camera [s]
+ 
+# --- Securites ---
+A_MAX      = 1.0                  # acceleration max [m/s^2]
+V_MAX      = 0.35                 # vitesse max [m/s]
+X_MIN, X_MAX = -0.05, 0.60        # limites de course [m] (relatives au depart)
+THETA_MAX  = np.radians(25)       # au-dela : arret d'urgence
+PERTE_MAX  = 0.20                 # duree max sans marqueur avant arret [s]
+DUREE      = 12.0                 # duree du test [s]
+ 
+# --- Materiel (ignores en simulation) ---
+ROBOT_IP         = "192.168.0.100"
+AXE              = 0
+CAMERA_ID        = 1
+MARKER_SIZE      = 0.157
+CALIBRATION_FILE = "output/calibration_data.pkl"
+COM_OFFSET       = np.array([0.0, 0.13, 0.0])
+N_CALIB          = 60
+N_DERIV          = 3
+ 
+# ========================= PREPARATION ==========================
+ 
+os.makedirs("logs", exist_ok=True)
+fname = os.path.join("logs", f"ctrl_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+log = open(fname, "w", newline="")
+w_csv = csv.writer(log)
+w_csv.writerow(["t", "x", "x_dot", "theta", "theta_dot", "u", "v_cmd", "sature"])
+ 
+if SIMULATION:
+    # --- Faux robot + fausse camera : le modele physique non lineaire ---
+    ZETA_N = 0.00228                              # amortissement naturel mesure
+    OMEGA  = np.sqrt(G / L_CABLE)
+    etat   = np.array([0.0, 0.0, 0.0, 0.0])       # x, x_dot, theta, theta_dot
+ 
+    def physique(z, a):
+        x, xd, th, thd = z
+        thdd = (-a*np.cos(th) - G*np.sin(th))/L_CABLE - 2*ZETA_N*OMEGA*thd
+        return np.array([xd, a, thd, thdd])
+ 
+    print("MODE SIMULATION (aucun materiel requis)")
+else:
+    import cv2, pickle
+    from collections import deque
+    from rtde_control import RTDEControlInterface
+    from rtde_receive import RTDEReceiveInterface
+ 
+    rtde_c = RTDEControlInterface(ROBOT_IP)
+    rtde_r = RTDEReceiveInterface(ROBOT_IP)
+    x0 = rtde_r.getActualTCPPose()[AXE]
+    print("Robot connecte.")
+ 
+    with open(CALIBRATION_FILE, "rb") as f:
+        data = pickle.load(f)
+    camera_matrix = np.array(data.get("camera_matrix") if data.get("camera_matrix") is not None else data.get("mtx"))
+    dist_coeffs   = np.array(data.get("distortion_coefficients") if data.get("distortion_coefficients") is not None else data.get("dist"))
+    detector = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50),
+                                       cv2.aruco.DetectorParameters())
+    hm = MARKER_SIZE/2
+    obj_points = np.array([[-hm, hm, 0], [hm, hm, 0], [hm, -hm, 0], [-hm, -hm, 0]], dtype=np.float32)
+ 
+    cap = cv2.VideoCapture(CAMERA_ID, cv2.CAP_DSHOW)
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280); cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FPS, 60)
+ 
+    P_PIVOT, calib = None, []
+    histo = deque(maxlen=N_DERIV + 1)
+    print(f"Calibration du pivot : BAC IMMOBILE, {N_CALIB} images...")
+ 
+# --- Etat partage, rafraichi par la camera (ou la simulation) ---
+theta, theta_dot = 0.0, 0.0
+t_last_marker = None
+ 
+# ============================ BOUCLE ============================
+ 
+v_cmd   = 0.0                      # vitesse commandee au robot [m/s]
+t       = 0.0
+t_start = time.perf_counter()
+t_cam   = -DT_CAM                  # force un rafraichissement camera des le 1er cycle
+arret   = None
+ 
+try:
+    while True:
+        # En simulation le temps avance par pas de DT (pas d'horloge murale),
+        # sinon la physique et les cadences camera/controle ne seraient pas coherentes.
+        t = (t + DT) if SIMULATION else (time.perf_counter() - t_start)
+        if t > DUREE:
+            arret = "duree atteinte"
+            break
+ 
+        # ---------- 1. Etat du chariot ----------
+        if SIMULATION:
+            x, x_dot = etat[0], etat[1]
+        else:
+            t_cycle = rtde_c.initPeriod()
+            x     = rtde_r.getActualTCPPose()[AXE] - x0
+            x_dot = rtde_r.getActualTCPSpeed()[AXE]
+ 
+        # ---------- 2. Etat du bac (camera, plus lente) ----------
+        if SIMULATION:
+            if t - t_cam >= DT_CAM:            # on ne rafraichit qu'a 60 Hz
+                t_cam = t
+                theta, theta_dot = etat[2], etat[3]
+                t_last_marker = t
+        else:
+            ret, frame = cap.read()
+            if ret:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                corners, ids, _ = detector.detectMarkers(gray)
+                if ids is not None:
+                    ok, rvec, tvec = cv2.solvePnP(obj_points, corners[0][0], camera_matrix, dist_coeffs)
+                    if ok:
+                        R_m, _ = cv2.Rodrigues(rvec)
+                        t_com = tvec.flatten() + R_m @ COM_OFFSET
+                        if P_PIVOT is None:
+                            calib.append(t_com)
+                            if len(calib) >= N_CALIB:
+                                P_PIVOT = np.mean(calib, axis=0) - np.array([0, 0, L_CABLE])
+                                print(f"[PIVOT] {np.round(P_PIVOT,4)} - controle actif")
+                                t_start = time.perf_counter()   # le test demarre ici
+                        else:
+                            c = t_com - P_PIVOT
+                            theta = np.arctan2(c[0], c[2])
+                            histo.append((t, theta))
+                            if len(histo) == N_DERIV + 1:
+                                t0, th0 = histo[0]
+                                theta_dot = (theta - th0) / (t - t0)
+                            t_last_marker = t
+            if P_PIVOT is None:                # tant que non calibre : robot immobile
+                rtde_c.speedL([0]*6, A_MAX, DT)
+                rtde_c.waitPeriod(t_cycle)
+                continue
+ 
+        # ---------- 3. Securites ----------
+        if abs(theta) > THETA_MAX:
+            arret = f"angle excessif ({np.degrees(theta):.1f} deg)"; break
+        if not (X_MIN <= x <= X_MAX):
+            arret = f"hors course (x={x:.3f} m)"; break
+        if t_last_marker is not None and (t - t_last_marker) > PERTE_MAX:
+            arret = "marqueur perdu"; break
+ 
+        # ---------- 4. LOI DE COMMANDE ----------
+        e = np.array([x - X_REF, x_dot, theta, theta_dot])
+        u = float(-K @ e)                      # acceleration desiree [m/s^2]
+        u_sat = float(np.clip(u, -A_MAX, A_MAX))
+ 
+        # ---------- 5. Integration : accel -> vitesse ----------
+        v_cmd += u_sat * DT
+        v_cmd = float(np.clip(v_cmd, -V_MAX, V_MAX))
+ 
+        # ---------- 6. Envoi ----------
+        if SIMULATION:
+            # le "robot" suit parfaitement la vitesse commandee : a = (v_cmd - x_dot)/DT
+            a_reelle = (v_cmd - etat[1]) / DT
+            k1 = physique(etat, a_reelle)
+            k2 = physique(etat + DT/2*k1, a_reelle)
+            k3 = physique(etat + DT/2*k2, a_reelle)
+            k4 = physique(etat + DT*k3, a_reelle)
+            etat = etat + DT/6*(k1 + 2*k2 + 2*k3 + k4)
+            time.sleep(0)                       # pas d'attente : simulation rapide
+        else:
+            vec = [0.0]*6; vec[AXE] = v_cmd
+            rtde_c.speedL(vec, A_MAX, DT)
+            rtde_c.waitPeriod(t_cycle)
+ 
+        w_csv.writerow([f"{t:.4f}", f"{x:.5f}", f"{x_dot:.5f}", f"{theta:.5f}",
+                        f"{theta_dot:.5f}", f"{u:.4f}", f"{v_cmd:.5f}", int(u != u_sat)])
+ 
+except KeyboardInterrupt:
+    arret = "interruption clavier"
+finally:
+    if not SIMULATION:
+        rtde_c.speedStop(); rtde_c.stopScript()
+        cap.release()
+    log.close()
+    print(f"\nArret : {arret}. Donnees dans {fname}")
+ 
+# ======================== ANALYSE RAPIDE ========================
+ 
+d = np.genfromtxt(fname, delimiter=",", names=True)
+th_deg = np.degrees(d["theta"])
+print(f"angle max       : {np.max(np.abs(th_deg)):.2f} deg")
+print(f"position finale : {d['x'][-1]:.4f} m (cible {X_REF})")
+print(f"erreur finale   : {1000*abs(d['x'][-1]-X_REF):.1f} mm")
+print(f"saturation      : {100*np.mean(d['sature']):.1f} % du temps")
+ 
+try:
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(3, 1, figsize=(11, 8), sharex=True)
+    ax[0].plot(d["t"], d["x"]); ax[0].axhline(X_REF, color="gray", ls=":")
+    ax[0].set_ylabel("x [m]"); ax[0].grid(alpha=.3)
+    ax[1].plot(d["t"], th_deg, color="tab:orange")
+    ax[1].set_ylabel("theta [deg]"); ax[1].grid(alpha=.3)
+    ax[2].plot(d["t"], d["u"], label="u desiree", lw=.8)
+    ax[2].plot(d["t"], d["v_cmd"], label="v commandee")
+    ax[2].set_ylabel("commande"); ax[2].set_xlabel("t [s]"); ax[2].legend(); ax[2].grid(alpha=.3)
+    fig.suptitle("Boucle fermee anti-ballant" + (" (simulation)" if SIMULATION else " (banc reel)"))
+    plt.tight_layout(); plt.savefig("resultat_boucle_fermee.png", dpi=130)
+    print("Figure : resultat_boucle_fermee.png")
+except ImportError:
+    pass

@@ -1,0 +1,99 @@
+"Lance un control de vitesse sur le UR10, en sinus a amplitude et frequence definies." 
+"Mesure la vitesse reelle du robot et la position relative de l'axe choisi."
+"Sauvegarde les donnees dans un fichier CSV et trace les courbes de consigne et de mesure."
+
+
+import numpy as np
+import time
+import csv
+import os
+from rtde_control import RTDEControlInterface
+from rtde_receive import RTDEReceiveInterface
+ 
+# ============================ CONFIG ============================
+ 
+ROBOT_IP   = "192.168.0.100"     # <<< IP de ton UR10
+AXE        = 0                   # 0 = X, 1 = Y, 2 = Z (axe de deplacement du "chariot")
+DT         = 0.008               # periode de la boucle [s] -> 125 Hz (UR10 CB3)
+V_AMP      = 0.05                # amplitude de la consigne de vitesse [m/s]
+F_TEST     = 0.5                 # frequence du test [Hz]
+DUREE      = 10.0                # duree du test [s]
+ACC        = 1.0                 # acceleration max autorisee a speedL [m/s^2]
+ 
+# ========================= PREPARATION ==========================
+ 
+rtde_c = RTDEControlInterface(ROBOT_IP)
+rtde_r = RTDEReceiveInterface(ROBOT_IP)
+print("Connecte au robot.")
+ 
+pose0 = rtde_r.getActualTCPPose()          # [x, y, z, rx, ry, rz]
+x0 = pose0[AXE]
+print(f"Position initiale axe {AXE} : {x0:.4f} m")
+ 
+os.makedirs("logs", exist_ok=True)
+fname = os.path.join("logs", f"ur10_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+log = open(fname, "w", newline="")
+w = csv.writer(log)
+w.writerow(["t", "v_cmd", "v_mes", "x_rel"])
+ 
+print(f"Test : sinus +-{V_AMP} m/s a {F_TEST} Hz pendant {DUREE} s. Ctrl+C pour arreter.")
+time.sleep(1.0)
+ 
+# ============================ BOUCLE ============================
+ 
+t_start = time.perf_counter()
+try:
+    while True:
+        t_cycle = rtde_c.initPeriod()          # ouvre le cycle temps reel
+        t = time.perf_counter() - t_start
+        if t > DUREE:
+            break
+ 
+        # --- lecture de l'etat du "chariot" ---
+        pose = rtde_r.getActualTCPPose()
+        vit  = rtde_r.getActualTCPSpeed()
+        x_rel = pose[AXE] - x0                 # position relative au depart [m]
+        v_mes = vit[AXE]                       # vitesse mesuree [m/s]
+ 
+        # --- consigne de test (ici sinus ; au Bloc 4 ce sera notre u integre) ---
+        v_cmd = V_AMP * np.sin(2 * np.pi * F_TEST * t)
+ 
+        vecteur = [0.0] * 6
+        vecteur[AXE] = v_cmd
+        rtde_c.speedL(vecteur, ACC, DT)
+ 
+        w.writerow([f"{t:.4f}", f"{v_cmd:.5f}", f"{v_mes:.5f}", f"{x_rel:.5f}"])
+        print(f"\rt={t:5.2f}s  v_cmd={v_cmd:+.3f}  v_mes={v_mes:+.3f} m/s  x={x_rel:+.3f} m",
+              end="", flush=True)
+ 
+        rtde_c.waitPeriod(t_cycle)             # cadence exacte a DT
+finally:
+    rtde_c.speedStop()                         # arret propre du mouvement
+    rtde_c.stopScript()
+    log.close()
+    print(f"\nTermine. Donnees dans {fname}")
+ 
+# ======================= ANALYSE DU RETARD =======================
+ 
+d = np.genfromtxt(fname, delimiter=",", names=True)
+t, vc, vm = d["t"], d["v_cmd"], d["v_mes"]
+# correlation croisee : de combien faut-il decaler v_mes pour coller a v_cmd ?
+n = len(t)
+corr = [np.corrcoef(vc[:n-k], vm[k:])[0, 1] for k in range(0, 40)]
+k_best = int(np.argmax(corr))
+print(f"Retard de suivi estime : {k_best} cycles = {1000*k_best*DT:.0f} ms")
+print(f"Gain d'amplitude : {np.std(vm)/np.std(vc):.3f} (1.0 = suivi parfait)")
+ 
+try:
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(2, 1, figsize=(11, 6), sharex=True)
+    ax[0].plot(t, vc, label="v commandee")
+    ax[0].plot(t, vm, label="v mesuree")
+    ax[0].set_ylabel("vitesse [m/s]"); ax[0].legend(); ax[0].grid(alpha=.3)
+    ax[1].plot(t, d["x_rel"], color="tab:green")
+    ax[1].set_ylabel("x [m]"); ax[1].set_xlabel("t [s]"); ax[1].grid(alpha=.3)
+    fig.suptitle("Bloc 1 : suivi de consigne de vitesse du UR10")
+    plt.tight_layout(); plt.savefig("suivi_ur10.png", dpi=130); plt.show()
+except ImportError:
+    pass
+ 

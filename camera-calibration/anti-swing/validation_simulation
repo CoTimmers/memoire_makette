@@ -1,0 +1,81 @@
+# -*- coding: utf-8 -*-
+"""
+Figure de validation pour le memoire : meme transfert de 1 m avec l = 3 m,
+avec et sans les termes d'anti-ballant, sur le modele NON LINEAIRE.
+Sortie : validation_simulation.pdf (pour LaTeX) et .png (pour verification).
+"""
+
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+# --- Parametres ---
+g, l = 9.81, 3.0
+zeta_n = 0.00228                 # amortissement naturel mesure
+omega = np.sqrt(g / l)
+K_full = np.array([1.000, 2.774, -15.19, -5.272])   # anti-ballant complet
+K_pos  = np.array([1.000, 2.774,   0.00,   0.000])  # position seule (k3 = k4 = 0)
+A_MAX, X_REF = 1.0, 1.0
+dt, t_end = 0.002, 30.0
+t = np.arange(0, t_end, dt)
+
+
+def dynamique(z, a):
+    x, xd, th, thd = z
+    thdd = (-a * np.cos(th) - g * np.sin(th)) / l - 2 * zeta_n * omega * thd
+    return np.array([xd, a, thd, thdd])
+
+
+def simuler(K):
+    z = np.zeros(4)
+    Z = np.zeros((len(t), 4))
+    U = np.zeros(len(t))
+    for i in range(len(t)):
+        u = float(-K @ (z - np.array([X_REF, 0, 0, 0])))
+        u = float(np.clip(u, -A_MAX, A_MAX))
+        k1 = dynamique(z, u)
+        k2 = dynamique(z + dt/2 * k1, u)
+        k3 = dynamique(z + dt/2 * k2, u)
+        k4 = dynamique(z + dt * k3, u)
+        z = z + dt/6 * (k1 + 2*k2 + 2*k3 + k4)
+        Z[i], U[i] = z, u
+    return Z, U
+
+
+Z_pos, U_pos = simuler(K_pos)
+Z_full, U_full = simuler(K_full)
+
+for nom, Z in [("position seule", Z_pos), ("anti-ballant", Z_full)]:
+    th = np.degrees(Z[:, 2])
+    resid = np.max(np.abs(th[t > 15]))
+    print(f"{nom:16s} angle max {np.max(np.abs(th)):5.2f} deg | "
+          f"residuel apres 15 s {resid:5.2f} deg | "
+          f"erreur finale {1000*abs(Z[-1,0]-X_REF):4.1f} mm")
+
+# --- Trace ---
+fig, ax = plt.subplots(3, 1, figsize=(7.0, 6.4), sharex=True)
+
+ax[0].plot(t, Z_pos[:, 0],  color="0.55", ls="--", lw=1.2, label="Position control only")
+ax[0].plot(t, Z_full[:, 0], color="k", lw=1.4, label="With anti-sway")
+ax[0].axhline(X_REF, color="0.7", ls=":", lw=0.8)
+ax[0].set_ylabel(r"$x$ [m]")
+ax[0].legend(fontsize=8, loc="lower right", frameon=False)
+ax[0].grid(alpha=0.25)
+
+ax[1].plot(t, np.degrees(Z_pos[:, 2]),  color="0.55", ls="--", lw=1.2)
+ax[1].plot(t, np.degrees(Z_full[:, 2]), color="k", lw=1.4)
+ax[1].axhline(0, color="0.7", lw=0.6)
+ax[1].set_ylabel(r"$\theta$ [deg]")
+ax[1].grid(alpha=0.25)
+
+ax[2].plot(t, U_pos,  color="0.55", ls="--", lw=1.2)
+ax[2].plot(t, U_full, color="k", lw=1.4)
+ax[2].set_ylabel(r"$a$ [m/s$^2$]")
+ax[2].set_xlabel("time [s]")
+ax[2].grid(alpha=0.25)
+
+plt.tight_layout()
+plt.savefig("validation_simulation.pdf")
+plt.savefig("validation_simulation.png", dpi=140)
+print("Figures ecrites : validation_simulation.pdf / .png")

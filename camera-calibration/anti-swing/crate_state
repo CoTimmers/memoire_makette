@@ -1,0 +1,114 @@
+"Sert à mesurer l'état du bac (angle et vitesse angulaire) à partir d'un marqueur ArUco fixé sur le bac."
+"Le pivot est calibré automatiquement sur les N_CALIB premières images (bac immobile)."
+
+
+import cv2
+import numpy as np
+import pickle
+import time
+import csv
+import os
+from collections import deque
+ 
+# ============================ CONFIG ============================
+ 
+CAMERA_ID        = 1
+MARKER_SIZE      = 0.157                            # cote reel du marqueur [m]
+CALIBRATION_FILE = "output/calibration_data.pkl"
+COM_OFFSET       = np.array([0.0, 0.13, 0.0])       # marqueur -> COM [m]
+L_CABLE          = 0.60                             # crochet -> COM [m]
+N_CALIB          = 60                               # nb d'images pour l'auto-calibration
+N_DERIV          = 3                                # fenetre pour theta_dot (optimum bruit/retard)
+ 
+# ========================= PREPARATION ==========================
+ 
+with open(CALIBRATION_FILE, "rb") as f:
+    data = pickle.load(f)
+camera_matrix = np.array(data.get("camera_matrix") if data.get("camera_matrix") is not None else data.get("mtx"))
+dist_coeffs   = np.array(data.get("distortion_coefficients") if data.get("distortion_coefficients") is not None else data.get("dist"))
+ 
+aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+detector   = cv2.aruco.ArucoDetector(aruco_dict, cv2.aruco.DetectorParameters())
+h = MARKER_SIZE / 2
+obj_points = np.array([[-h,  h, 0], [ h,  h, 0],
+                       [ h, -h, 0], [-h, -h, 0]], dtype=np.float32)
+ 
+cap = cv2.VideoCapture(CAMERA_ID, cv2.CAP_DSHOW)
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+cap.set(cv2.CAP_PROP_FPS, 60)
+ 
+os.makedirs("logs", exist_ok=True)
+fname = os.path.join("logs", f"etat_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+log_file = open(fname, "w", newline="")
+log_writer = csv.writer(log_file)
+log_writer.writerow(["t", "theta_rad", "theta_dot", "l_meas", "com_x", "com_y", "com_z"])
+histo = deque(maxlen=N_DERIV + 1)                   # memorise les (t, theta) recents
+print(f"Log -> {fname}")
+print(f"Calibration du pivot sur les {N_CALIB} premieres images : BAC IMMOBILE svp...")
+ 
+P_PIVOT = None
+calib_buffer = []
+ 
+# ============================ BOUCLE ============================
+ 
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Lecture camera echouee.")
+            break
+        t_now = time.perf_counter()
+ 
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        corners, ids, _ = detector.detectMarkers(gray)
+ 
+        if ids is not None:
+            cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+            ok, rvec, tvec = cv2.solvePnP(obj_points, corners[0][0], camera_matrix, dist_coeffs)
+            if ok:
+                R_marker, _ = cv2.Rodrigues(rvec)
+                t_com = tvec.flatten() + R_marker @ COM_OFFSET
+ 
+                if P_PIVOT is None:
+                    # --- phase d'auto-calibration (bac immobile) ---
+                    calib_buffer.append(t_com)
+                    if len(calib_buffer) >= N_CALIB:
+                        moyenne = np.mean(calib_buffer, axis=0)
+                        P_PIVOT = moyenne - np.array([0.0, 0.0, L_CABLE])
+                        print(f"[PIVOT] calibre : {np.round(P_PIVOT, 4)}")
+                        print("theta doit maintenant afficher ~0.00 tant que le bac est immobile.")
+                else:
+                    # --- etat du bac ---
+                    c = t_com - P_PIVOT                 # vecteur crochet -> COM
+                    theta = np.arctan2(c[0], c[2])      # +x camera = axe de deplacement du robot
+                    l_meas = float(np.linalg.norm(c))
+ 
+                    # theta_dot : difference finie sur N_DERIV frames (compromis bruit/retard)
+                    histo.append((t_now, theta))
+                    if len(histo) == N_DERIV + 1:
+                        t0, th0 = histo[0]
+                        theta_dot = (theta - th0) / (t_now - t0)
+                    else:
+                        theta_dot = 0.0                 # pas encore assez d'images
+ 
+                    log_writer.writerow([f"{t_now:.4f}", f"{theta:.5f}", f"{theta_dot:.5f}",
+                                         f"{l_meas:.4f}",
+                                         f"{t_com[0]:.4f}", f"{t_com[1]:.4f}", f"{t_com[2]:.4f}"])
+                    print(f"\rtheta = {np.degrees(theta):+7.2f} deg   "
+                          f"theta_dot = {theta_dot:+6.3f} rad/s   l = {l_meas:.3f} m",
+                          end="", flush=True)
+ 
+                    txt = f"theta {np.degrees(theta):+.2f} deg   thd {theta_dot:+.2f} rad/s   l {l_meas:.3f} m"
+                    cv2.putText(frame, txt, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3, cv2.LINE_AA)
+                    cv2.putText(frame, txt, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 1, cv2.LINE_AA)
+ 
+        cv2.imshow("Etat du bac", frame)
+        if (cv2.waitKey(1) & 0xFF) == ord('q'):
+            break
+finally:
+    log_file.close()
+    cap.release()
+    cv2.destroyAllWindows()
+    print(f"\nTermine. Donnees dans {fname}")
