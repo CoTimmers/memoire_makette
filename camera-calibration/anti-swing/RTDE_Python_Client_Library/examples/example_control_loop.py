@@ -33,7 +33,7 @@ import rtde.rtde_config as rtde_config
 
 # logging.basicConfig(level=logging.INFO)
 
-ROBOT_HOST = "localhost"
+ROBOT_HOST = "localhost" #IP Adress of the robot
 ROBOT_PORT = 30004
 config_filename = "control_loop_configuration.xml"
 
@@ -53,7 +53,9 @@ con.connect()
 con.get_controller_version()
 
 # setup recipes
-con.send_output_setup(state_names, state_types)
+con.send_output_setup(state_names, state_types) #allow you to receive the state of the robot
+
+
 setp = con.send_input_setup(setp_names, setp_types)
 watchdog = con.send_input_setup(watchdog_names, watchdog_types)
 
@@ -92,8 +94,10 @@ if not con.send_start():
 # control loop
 move_completed = True
 while keep_running:
-    # receive the current state
+    # receive the current state --> (State that I want to receive, defined in "control_loop_configuration.xml")
     state = con.receive()
+    
+    state.actual_TCP_pose()  
 
     if state is None:
         break

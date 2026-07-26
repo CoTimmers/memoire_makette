@@ -160,7 +160,7 @@ class RTDE(object):
         self.__input_config[result.id] = result
         return serialize.DataObject.create_empty(variables, result.id)
 
-    def send_output_setup(self, variables, types=[], frequency=125):
+    def send_output_setup(self, variables, types=[], frequency=125): #125 Hz means how fast the robot will send the data to the client
         cmd = Command.RTDE_CONTROL_PACKAGE_SETUP_OUTPUTS
         payload = struct.pack(">d", frequency)
         payload = payload + (",".join(variables).encode("utf-8"))

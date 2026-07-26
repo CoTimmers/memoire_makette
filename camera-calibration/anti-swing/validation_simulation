@@ -23,16 +23,24 @@ t = np.arange(0, t_end, dt)
 
 def dynamique(z, a):
     x, xd, th, thd = z
-    thdd = (-a * np.cos(th) - g * np.sin(th)) / l - 2 * zeta_n * omega * thd
+    thdd = (-a * np.cos(th) - g * np.sin(th)) / l - 2 * zeta_n * omega * thd    # l·θ̈ + a·cosθ + g·sinθ = 0 avec le terme d'amortissement 2ζω·θ̇
     return np.array([xd, a, thd, thdd])
+
+
+DT_CAM = 1/60.0                  # cadence du capteur de vision
 
 
 def simuler(K):
     z = np.zeros(4)
     Z = np.zeros((len(t), 4))
     U = np.zeros(len(t))
+    th_mes, thd_mes, t_cam = 0.0, 0.0, -DT_CAM   # mesure d'angle bloquee entre 2 images
     for i in range(len(t)):
-        u = float(-K @ (z - np.array([X_REF, 0, 0, 0])))
+        if t[i] - t_cam >= DT_CAM:               # rafraichissement a 60 Hz seulement
+            t_cam = t[i]
+            th_mes, thd_mes = z[2], z[3]
+        z_mes = np.array([z[0], z[1], th_mes, thd_mes])
+        u = float(-K @ (z_mes - np.array([X_REF, 0, 0, 0])))
         u = float(np.clip(u, -A_MAX, A_MAX))
         k1 = dynamique(z, u)
         k2 = dynamique(z + dt/2 * k1, u)
