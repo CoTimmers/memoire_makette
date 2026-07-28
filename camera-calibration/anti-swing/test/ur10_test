@@ -12,7 +12,7 @@ from rtde_receive import RTDEReceiveInterface
  
 # ============================ CONFIG ============================
  
-ROBOT_IP   = "192.168.0.100"     # <<< IP de ton UR10
+ROBOT_IP   = "127.0.0.1"     # <<< IP de ton UR10
 AXE        = 0                   # 0 = X, 1 = Y, 2 = Z (axe de deplacement du "chariot")
 DT         = 0.008               # periode de la boucle [s] -> 125 Hz (UR10 CB3)
 V_AMP      = 0.05                # amplitude de la consigne de vitesse [m/s]
