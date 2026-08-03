@@ -1,12 +1,6 @@
 """Move from the current position to a known target, with anti-sway control.
 
-The motion is a straight line: position and velocity are projected onto the unit
-direction from start to target, the control law works on that single coordinate,
-and the commanded velocity is distributed back over the components. The tool
-orientation is held constant, so the camera keeps looking the same way.
-
-USE_CAMERA = False lets the trajectory be tested without the crate: the sway terms
-are simply zero and only the position loop is active.
+Correction du sway que dans une direction (direction du déplacement). Le sway dans l'autre direction n'est pas corrigé.
 """
 
 import rtde_control
@@ -55,7 +49,7 @@ if abs(delta[2]) > DZ_MAX:
 # ---------------- camera (optional) ----------------
 etat = {"theta": 0.0, "theta_dot": 0.0, "t": time.perf_counter()}
 if USE_CAMERA:
-    import camera_thread                  # start_camera() fills 'etat'
+    import controller.camera_thread as camera_thread                  # start_camera() fills 'etat'
     camera_thread.start(etat, L_CABLE)
     print("waiting for the camera (keep the crate still)...")
     while etat.get("pret") is not True:

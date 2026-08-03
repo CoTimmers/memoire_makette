@@ -1,12 +1,6 @@
 """Full anti-sway state feedback: a = -K (z - z_ref), z = [x, x_dot, theta, theta_dot].
 
-x, x_dot come from the robot encoders (RTDE, no differentiation needed).
-theta comes from the camera; theta_dot is differentiated over N_DERIV frames.
-The camera runs in its own thread so the control loop keeps a steady 125 Hz.
-
-Before the first run: set ROBOT_IP, AXE, CAMERA_ID, MARKER_SIZE, COM_OFFSET.
-Sign check first: set X_REF = 0, push the crate by hand, the robot must move
-towards the side the load swings to. If it moves the other way, set SIGN = -1.
+déplacement unidireectionnel de 10cm
 """
 
 import rtde_control
