@@ -49,8 +49,8 @@ OFFSET_ACCROCHE = np.array([0.0, 0.0, 0.0])  # helper marker -> cable attachment
 
 # Camera horizontal axes -> robot base axes. Identity assumes cam x // base x.
 # [[-1,0],[0,1]] inverts x, [[0,1],[1,0]] swaps the axes, etc.
-CAM2BASE = np.array([[1.0, 0.0],
-                     [0.0, 1.0]])
+CAM2BASE = np.array([[1.0,  0.0],
+                     [0.0, -1.0]])
 
 N_CALIB = 60                    # frames used to locate the cable pivot
 N_DERIV = 3                     # frames used to differentiate theta
@@ -105,11 +105,11 @@ def _loop(etat, l_cable):
         cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50),
         cv2.aruco.DetectorParameters())
 
-    cap = cv2.VideoCapture(CAMERA_ID, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(CAMERA_ID, cv2.CAP_V4L2)
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    cap.set(cv2.CAP_PROP_FPS, 60)
+    cap.set(cv2.CAP_PROP_FPS, 30)
 
     pivot, calib, histo = None, [], []
 
