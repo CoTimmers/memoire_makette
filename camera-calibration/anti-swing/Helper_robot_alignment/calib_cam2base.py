@@ -6,12 +6,11 @@ import numpy as np
 import cv2
 import pickle
 import time
-from pathlib import Path
 
 ROBOT_IP    = "192.168.56.102"
 CAMERA_ID   = 0
-ID_MARQUEUR = 8
-TAILLE      = 0.157
+ID_MARQUEUR = 12
+TAILLE      = 0.100
 CALIB_FILE  = "output/calibration_data.pkl"
 PAS         = 0.05
 V, A        = 0.05, 0.2
@@ -32,11 +31,15 @@ cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+print("resolution:", int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+      "x", int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
 
-def position_marqueur(n=20, timeout=10.0):
-    for _ in range(5):          # vide le buffer accumulé pendant le moveL
-        cap.read()
+def position_marqueur(n=20, timeout=15.0):
+    print("  vidage buffer...", flush=True)
+    for _ in range(5):
+        cap.grab()
+    print("  detection...", flush=True)
     vus = []
     t0 = time.time()
     nb_frames = nb_read_ko = nb_sans_marqueur = 0
@@ -59,12 +62,12 @@ def position_marqueur(n=20, timeout=10.0):
         ok, rvec, tvec = cv2.solvePnP(obj, corners[i][0], mtx, dist)
         if ok:
             vus.append(tvec.flatten())
+    print(f"  ok ({nb_frames} frames)", flush=True)
     return np.mean(vus, axis=0)
 
 
 rtde_r = rtde_receive.RTDEReceiveInterface(ROBOT_IP)
-RC = rtde_control.RTDEControlInterface
-rtde_c = RC(ROBOT_IP, 125.0, RC.FLAG_UPLOAD_SCRIPT | RC.FLAG_UPPER_RANGE_REGISTERS)
+rtde_c = rtde_control.RTDEControlInterface(ROBOT_IP)
 
 pose0 = rtde_r.getActualTCPPose()
 print("pose de depart:", [round(x, 3) for x in pose0])
@@ -89,7 +92,7 @@ try:
         time.sleep(0.5)
 
         d = -(p_apres - p_avant)[:2] / PAS
-        print(f"  observed direction in camera frame: {np.round(d, 3)}")
+        print(f"  observed direction: {np.round(d, 3)}")
         colonnes.append(d)
 
     M = np.column_stack(colonnes)
@@ -101,7 +104,7 @@ try:
 
 finally:
     try:
-        rtde_c.moveL(list(pose0), V, A)   # retour garanti meme sur Ctrl+C
+        rtde_c.moveL(list(pose0), V, A)
     except Exception:
         pass
     cap.release()
