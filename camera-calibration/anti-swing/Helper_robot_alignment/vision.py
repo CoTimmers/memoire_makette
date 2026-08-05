@@ -8,6 +8,8 @@ Shared dict, updated by its own thread:
     erreur      [ex, ey]     from the attachment point to the centre of the
                              target zone, in robot base axes              [m]
     theta       [thx, thy]   raw sway angles, base axes                 [rad]
+    yaw         float        rotation of the crate about the vertical, relative
+                             to the world frame                         [rad]
     err_monde   [ex, ey]     same error, along the world axes, for the zone test
     dans_cible  bool         attachment point inside the target rectangle
     vus         (ref, charge)
@@ -17,6 +19,11 @@ Shared dict, updated by its own thread:
 
 theta_dot is deliberately not computed here: the Kalman filter reconstructs it,
 with far less noise and with the camera delay compensated.
+
+yaw is measured but not controlled: the tool never rotates, and a cable
+transmits no torque about its own axis, so nothing in the loop can act on it.
+It is logged because the crate has to end up aligned with the target zone, and
+because a yaw that grows during transport signals the load rotating freely.
 """
 
 import cv2
@@ -154,6 +161,12 @@ def _loop(etat, l_cable):
             etat["err_monde"] = err_monde
             etat["dans_cible"] = dans
 
+            # Yaw: angle of the crate x axis, projected on the world plane.
+            # Taking the projection rather than a full Euler decomposition
+            # keeps the value meaningful while the crate is tilted by the sway.
+            x_c = R_r.T @ R_c[:, 0]
+            etat["yaw"] = float(np.arctan2(x_c[1], x_c[0]))
+
         etat["t"] = t
         etat["pret"] = "erreur" in etat
 
@@ -195,6 +208,7 @@ def _loop(etat, l_cable):
                       f"{'IN' if dans else 'out'}",
                       f"theta        {np.degrees(etat['theta'][0]):+5.1f}, "
                       f"{np.degrees(etat['theta'][1]):+5.1f} deg",
+                      f"yaw          {np.degrees(etat['yaw']):+6.1f} deg",
                       f"l_mes        {etat['l_mes']:.3f} m  (attendu "
                       f"{l_cable:.3f})",
                       f"vus          ref {ref is not None}   charge True"]
@@ -212,7 +226,7 @@ def _loop(etat, l_cable):
 
 
 def start(etat, l_cable):
-    etat.update({"theta": np.zeros(2), "err_monde": np.zeros(2),
+    etat.update({"theta": np.zeros(2), "err_monde": np.zeros(2), "yaw": 0.0,
                  "vus": (False, False), "dans_cible": False, "pret": False,
                  "t": time.perf_counter(), "l_mes": l_cable})
     threading.Thread(target=_loop, args=(etat, l_cable), daemon=True).start()
