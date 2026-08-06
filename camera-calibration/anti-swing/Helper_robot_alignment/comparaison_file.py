@@ -77,7 +77,11 @@ for k, (nom, d) in enumerate(donnees):
 
     ax[0].plot(t, thx, color=c, lw=1.3, label=f"{nom}  x")
     ax[0].plot(t, thy, color=c, lw=1.1, ls="--", label=f"{nom}  y")
+    if "th_brut_x" in d.dtype.names:
+        ax[0].plot(t, np.degrees(d["th_brut_x"]), color=c, lw=0.8,
+                   alpha=0.5, label=f"{nom}  x brut")
     ax[i_err].plot(t, e, color=c, lw=1.3, label=nom)
+
     ax[i_vit].plot(t, v, color=c, lw=1.0, label=nom)
 
     if avec_yaw:

@@ -72,7 +72,7 @@ class KalmanSway:
     """Kalman filter for one sway plane, with delayed-measurement handling."""
 
     def __init__(self,
-                 L: float = 0.5225,          # cable length [m]
+                 L: float = 1.17,          # cable length [m]
                  zeta: float = 0.00228,      # measured natural damping [-]
                  Ts: float = 1 / 125,        # control period [s], CB3
                  sigma_a: float = 0.05,      # acceleration uncertainty [m/s^2]

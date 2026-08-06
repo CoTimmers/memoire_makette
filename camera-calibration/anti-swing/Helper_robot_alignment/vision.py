@@ -42,16 +42,18 @@ TAILLE_CHARGE = 0.157           # printed side [m]
 TAILLE_REF    = 0.100           # printed side [m]
 
 # Offsets in each marker's own frame, so they rotate with it.
-OFFSET_ORIGINE  = np.array([-0.05, 0.08, 0.0])   # ref marker    -> world origin
-OFFSET_ACCROCHE = np.array([-0.05, 0.11, 0.0])   # crate marker  -> cable attachment
-CRANE_TARGET    = np.array([-0.12, -0.12, 0.0])  # world origin  -> centre of the zone
-CIBLE_DEMI      = np.array([0.040, 0.040])       # half-size of the zone [m]
+OFFSET_ORIGINE  = np.array([-0.07, 0.095, 0.0])   # ref marker    -> world origin
+OFFSET_ACCROCHE = np.array([-0.05, 0.12, 0.0])   # crate marker  -> cable attachment
+CRANE_TARGET    = np.array([-0.15, -0.17, 0.0])  # world origin  -> centre of the zone
+CIBLE_DEMI      = np.array([0.030, 0.030])       # half-size of the zone [m]
+OFFSET_LONG_SIDE_ALIGNED  = np.array([-0.155, -0.225, 0.0])
+OFFSET_SHORT_SIDE_ALIGNED = np.array([ -0.25, -0.16, 0.0])
 
 # Camera horizontal axes -> robot base axes. From calib_cam2base.py.
 CAM2BASE = np.array([[1.0, 0.0],
                      [0.0, -1.0]])
 
-RETARD_CAM = 0.045              # capture -> availability [s], from mesure_retard.py
+RETARD_CAM = 0.031              # capture -> availability [s], from mesure_retard.py
 N_CALIB    = 60                 # frames used to locate the cable pivot
 
 AFFICHAGE = False               # True to open the debug window
@@ -96,6 +98,9 @@ def _triede(frame, origine, R, mtx, dist, longueur=0.06):
                     couleur, 1, cv2.LINE_AA)
     return o
 
+coin_f = None
+R_r_f = None
+ALPHA_REF = 0.5  
 
 def _loop(etat, l_cable):
     with open(CALIB_FILE, "rb") as f:
@@ -103,17 +108,20 @@ def _loop(etat, l_cable):
     mtx = np.array(data.get("camera_matrix", data.get("mtx")))
     dist = np.array(data.get("distortion_coefficients", data.get("dist")))
 
+    params = cv2.aruco.DetectorParameters()
+    params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
     detector = cv2.aruco.ArucoDetector(
-        cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50),
-        cv2.aruco.DetectorParameters())
+        cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50), params)
 
     cap = cv2.VideoCapture(CAMERA_ID, cv2.CAP_V4L2)
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
     cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     pivot, calib = None, []
+    coin_f, R_ref_f = None, None        # repère monde lissé
 
     while not _stop.is_set():
         ok, frame = cap.read()
@@ -148,23 +156,47 @@ def _loop(etat, l_cable):
         etat["theta"] = CAM2BASE @ th
         etat["l_mes"] = float(np.linalg.norm(c))
 
-        # ---- position error, only when the reference is visible ----
-        coin = cible = None
-        dans = False
+        # ---- world frame, low-pass filtered ----
+        # The reference marker is static, so heavy smoothing costs nothing and
+        # removes the orientation jitter that the target squares amplify.
         if ref is not None:
             p_r, R_r = ref
-            coin = p_r + R_r @ OFFSET_ORIGINE
-            cible = coin + R_r @ CRANE_TARGET
+            coin_brut = p_r + R_r @ OFFSET_ORIGINE
+            if coin_f is None:
+                coin_f, R_ref_f = coin_brut, R_r
+            else:
+                coin_f = (1 - ALPHA_REF) * coin_f + ALPHA_REF * coin_brut
+                R_ref_f = (1 - ALPHA_REF) * R_ref_f + ALPHA_REF * R_r
+                U, _, Vt = np.linalg.svd(R_ref_f)   # back onto SO(3)
+                R_ref_f = U @ Vt
+
+        # ---- position error and drop zones ----
+        coin = cible = zones = None
+        dans, zone_ok = False, None
+        if coin_f is not None:
+            coin, R_ref = coin_f, R_ref_f
+            cible = coin + R_ref @ CRANE_TARGET
+
+            # command error: attachment point -> point the crane aims at
             etat["erreur"] = CAM2BASE @ (cible - accroche)[:2]
-            err_monde = (R_r.T @ (accroche - cible))[:2]
-            dans = bool(np.all(np.abs(err_monde) < CIBLE_DEMI))
+
+            zones = {"long":  coin + R_ref @ OFFSET_LONG_SIDE_ALIGNED,
+                     "short": coin + R_ref @ OFFSET_SHORT_SIDE_ALIGNED}
+
+            err_monde = None
+            for nom, centre in zones.items():
+                e = (R_ref.T @ (accroche - centre))[:2]
+                if err_monde is None or np.linalg.norm(e) < np.linalg.norm(err_monde):
+                    err_monde = e                  # distance to the nearest zone
+                if np.all(np.abs(e) < CIBLE_DEMI):
+                    dans, zone_ok = True, nom
+
             etat["err_monde"] = err_monde
             etat["dans_cible"] = dans
+            etat["zone"] = zone_ok
 
             # Yaw: angle of the crate x axis, projected on the world plane.
-            # Taking the projection rather than a full Euler decomposition
-            # keeps the value meaningful while the crate is tilted by the sway.
-            x_c = R_r.T @ R_c[:, 0]
+            x_c = R_ref.T @ R_c[:, 0]
             etat["yaw"] = float(np.arctan2(x_c[1], x_c[0]))
 
         etat["t"] = t
@@ -180,38 +212,41 @@ def _loop(etat, l_cable):
             cv2.putText(frame, "accroche", (u_a[0] + 14, u_a[1] - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 1, cv2.LINE_AA)
 
-            if coin is not None:
-                u_c = _triede(frame, coin, R_r, mtx, dist)
+            if zones is not None:
+                u_c = _triede(frame, coin, R_ref, mtx, dist)
                 cv2.circle(frame, u_c, 6, (255, 255, 0), 2)
                 cv2.putText(frame, "origine monde", (u_c[0] + 14, u_c[1] - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1,
                             cv2.LINE_AA)
 
                 w, h = CIBLE_DEMI
-                sommets = [cible + R_r @ np.array([sx * w, sy * h, 0.0])
-                           for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
-                pts = np.array([_projette(p, mtx, dist) for p in sommets], np.int32)
-                couleur = (0, 200, 0) if dans else (0, 0, 255)
-                cv2.polylines(frame, [pts], True, couleur, 2, cv2.LINE_AA)
+                for nom, centre in zones.items():
+                    sommets = [centre + R_ref @ np.array([sx * w, sy * h, 0.0])
+                               for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+                    pts = np.array([_projette(p, mtx, dist) for p in sommets],
+                                   np.int32)
+                    couleur = (0, 200, 0) if zone_ok == nom else (0, 0, 255)
+                    cv2.polylines(frame, [pts], True, couleur, 2, cv2.LINE_AA)
+                    cv2.putText(frame, nom, (pts[3][0], pts[3][1] - 8),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, couleur, 2,
+                                cv2.LINE_AA)
+
                 u_t = _projette(cible, mtx, dist)
-                cv2.drawMarker(frame, u_t, couleur, cv2.MARKER_CROSS, 14, 1)
-                cv2.arrowedLine(frame, u_a, u_t, couleur, 1, cv2.LINE_AA,
+                cv2.drawMarker(frame, u_t, (0, 255, 255), cv2.MARKER_CROSS, 14, 2)
+                cv2.arrowedLine(frame, u_a, u_t, (0, 255, 255), 1, cv2.LINE_AA,
                                 tipLength=0.05)
-                cv2.putText(frame, "IN" if dans else "cible",
-                            (pts[3][0], pts[3][1] - 8), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.6, couleur, 2, cv2.LINE_AA)
 
             e = etat.get("erreur", np.zeros(2))
             em = etat.get("err_monde", np.zeros(2))
-            lignes = [f"erreur base  {1000*e[0]:+6.0f}, {1000*e[1]:+6.0f} mm",
-                      f"erreur monde {1000*em[0]:+6.0f}, {1000*em[1]:+6.0f} mm  "
-                      f"{'IN' if dans else 'out'}",
+            lignes = [f"error base   {1000*e[0]:+6.0f}, {1000*e[1]:+6.0f} mm",
+                      f"error world  {1000*em[0]:+6.0f}, {1000*em[1]:+6.0f} mm  "
+                      f"{'IN (' + str(zone_ok) + ')' if dans else 'out'}",
                       f"theta        {np.degrees(etat['theta'][0]):+5.1f}, "
                       f"{np.degrees(etat['theta'][1]):+5.1f} deg",
                       f"yaw          {np.degrees(etat['yaw']):+6.1f} deg",
-                      f"l_mes        {etat['l_mes']:.3f} m  (attendu "
+                      f"l_mes        {etat['l_mes']:.3f} m  (expected "
                       f"{l_cable:.3f})",
-                      f"vus          ref {ref is not None}   charge True"]
+                      f"seen         ref {ref is not None}   load True"]
             for i, s in enumerate(lignes):
                 cv2.putText(frame, s, (10, 28 + 26 * i), cv2.FONT_HERSHEY_SIMPLEX,
                             0.6, (0, 0, 0), 3, cv2.LINE_AA)

@@ -53,7 +53,7 @@ class Gains:
     """Feedback gains, computed once from the cable length."""
 
     def __init__(self,
-                 L: float = 0.5225,          # cable length [m]
+                 L: float = 1.17,          # cable length [m]
                  zeta: float = 0.00228,      # measured natural damping [-]
                  zeta_cl: float = 0.7,       # damping wanted in closed loop [-]
                  omega_t: float = 1.0,       # position loop bandwidth [rad/s]
@@ -79,8 +79,11 @@ class Gains:
         if verbose:
             print(f"L = {L:.4f} m   omega_n = {self.omega_n:.4f} rad/s   "
                   f"T_n = {2*np.pi/self.omega_n:.4f} s")
+            # print(f"K_x = {self.K_x:.4f} 1/s        position pole at "
+            #       f"{-omega_t:.2f} rad/s, tau = {1/omega_t:.2f} s")
+            tau = f"tau = {1/omega_t:.2f} s" if omega_t > 1e-9 else "pas de boucle de position"
             print(f"K_x = {self.K_x:.4f} 1/s        position pole at "
-                  f"{-omega_t:.2f} rad/s, tau = {1/omega_t:.2f} s")
+                  f"{-omega_t:.2f} rad/s, {tau}")
             print(f"K_theta = {self.K_theta:.4f} m/s per rad   "
                   f"({np.radians(1)*self.K_theta*1000:.1f} mm/s per degree)")
             print(f"K_thetadot = {self.K_thetadot:.4f} m per rad")
@@ -216,3 +219,38 @@ if __name__ == "__main__":
     print(f"\nlimiter after 5 steps at v_raw = 1 m/s: v = {np.round(lim.v_prev, 4)}"
           f"   a_applied = {np.round(lim.a_applied, 3)}"
           f"   saturated {100*lim.taux_saturation:.0f} % of calls")
+
+
+class Integrateur:
+    """Integral term on the position error, to overcome static friction.
+
+    A proportional law leaves a steady-state error whenever a constant
+    resistance opposes the motion: at equilibrium the command K_x * e is too
+    small to break the friction and the load stops short of the target. The
+    integral accumulates that error until the command is large enough.
+
+    It is deliberately not active during the planned motion: the feedforward
+    already produces the displacement there, and accumulating would cause an
+    overshoot. Friction only matters at the end of the move, at low speed.
+    """
+
+    def __init__(self, K_i: float = 0.15, v_max: float = 0.05, Ts: float = 1 / 500):
+        self.K_i, self.v_max, self.Ts = K_i, v_max, Ts
+        self.I = np.zeros(2)
+        self.actif = False
+
+    def __call__(self, erreur, actif: bool) -> np.ndarray:
+        if not actif:
+            self.actif = False
+            return np.zeros(2)
+        if not self.actif:          # first activation: start from zero
+            self.I = np.zeros(2)
+            self.actif = True
+        self.I += np.asarray(erreur, float) * self.Ts
+        borne = self.v_max / self.K_i if self.K_i > 1e-12 else 0.0
+        self.I = np.clip(self.I, -borne, borne)
+        return self.K_i * self.I
+
+    def reset(self):
+        self.I = np.zeros(2)
+        self.actif = False

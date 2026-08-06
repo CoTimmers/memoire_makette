@@ -27,22 +27,23 @@ import rtde_receive
 import vision
 import trajectory
 from estimator import SwayEstimator2D
-from controller import Gains, feedback, CommandLimiter, FinDeMouvement
+from controller import Gains, feedback, CommandLimiter, FinDeMouvement, Integrateur
 
 # ---------------- configuration ----------------
 ROBOT_IP = "192.168.56.102"
-L_CABLE  = 1.17
-Ts       = 1 / 125
+L_VRAI   = 1.11         
+L_MODELE = 1.11  #1.05m pour les -5% et 1.17 pour +5%
+Ts       = 1 / 500
 
 FEEDFORWARD = True              # shaped trapezoid built from the measured error
 FEEDBACK    = True              # state feedback on the deviation and the sway
 
-T1     = 2 * np.pi * np.sqrt(L_CABLE / 9.81)    # damped period, ramp duration [s]
+T1     = 2 * np.pi * np.sqrt(L_MODELE / 9.81)    # damped period, ramp duration [s]
 V_TRAJ = 0.15                                    # cruise speed of the plan [m/s]
 
-ZETA_CL, OMEGA_T = 0.7, 1.0     # closed-loop sway damping, position bandwidth
+ZETA_CL, OMEGA_T = 0.15, 0.3     # closed-loop sway damping, position bandwidth
 
-V_MAX, A_MAX, JERK_MAX = 0.3, 0.8, 8.0
+V_MAX, A_MAX, JERK_MAX = 0.3, 0.8, 32.0
 V_FB_MAX   = 0.25               # saturation of the feedback part alone [m/s]
 COURSE_MAX = 0.50               # excursion allowed from the start pose [m]
 THETA_MAX  = np.radians(20)
@@ -50,6 +51,17 @@ AGE_MAX    = 0.30               # max age of a vision measurement [s]
 T_OBSERV   = 5.0                # recording time after the plan ends [s]
 TIMEOUT    = 90.0
 DRY_RUN    = False              # True = no motion, display only
+K_I = 0.15
+I_MAX = 0.05
+
+
+APPUI_D_ERR = 0.005         # variation d'erreur sous laquelle on juge bloque [m]
+APPUI_T     = 1.0           # duree pendant laquelle ca doit durer [s]
+err_ref, t_err_ref, appui = None, 0.0, False
+
+
+t_ref_vue = time.perf_counter()
+REF_PERDUE_MAX = 2.0  
 
 if not (FEEDFORWARD or FEEDBACK):
     raise SystemExit("At least one of FEEDFORWARD and FEEDBACK must be True.")
@@ -74,18 +86,19 @@ print("pose de depart:", [round(x, 3) for x in POSE_DEPART])
 # ---------------- vision ----------------
 etat = {}
 vision.AFFICHAGE = True
-vision.start(etat, L_CABLE)
+vision.start(etat, L_VRAI)
 print("bac immobile pour la calibration du pivot...")
 while not etat["pret"]:
     time.sleep(0.1)
 print("pret.\n")
 
 # ---------------- control blocks ----------------
-gains = Gains(L=L_CABLE, zeta_cl=ZETA_CL, omega_t=OMEGA_T)
-est   = SwayEstimator2D(L=L_CABLE, Ts=Ts)
+gains = Gains(L=L_MODELE, zeta_cl=ZETA_CL, omega_t=OMEGA_T)
+est   = SwayEstimator2D(L=L_MODELE, Ts=Ts)
 lim   = CommandLimiter(Ts, V_MAX, A_MAX, JERK_MAX)
-fin   = FinDeMouvement(eps_x=0.010, eps_theta=np.radians(1.0),
+fin   = FinDeMouvement(eps_x=0.040, eps_theta=np.radians(1.5),
                        eps_theta_dot=0.02, eps_v=0.010, T_dwell=0.5)
+integ = Integrateur(K_i=K_I, v_max=I_MAX, Ts=Ts)
 
 # the plan comes from the error measured by the camera, not from a hardcoded pose
 e0 = np.asarray(etat["erreur"], float)
@@ -97,17 +110,23 @@ log = open(NOM_CSV, "w", newline="")
 w = csv.writer(log)
 w.writerow(["t", "ex", "ey", "th_x", "th_y", "thd_x", "thd_y", "yaw",
             "vref_x", "vref_y", "vfb_x", "vfb_y", "vcmd_x", "vcmd_y",
-            "tcp_x", "tcp_y", "dans_cible"])
+            "tcp_x", "tcp_y", "dans_cible", "th_brut_x", "th_brut_y"])
 
 t_last = 0.0
 t_start = time.perf_counter()
 raison = "cible atteinte"
 pic_ballant = 0.0
+#####
+n_cycles = 0 
+
+
 
 try:
     while True:
         t_cycle = rtde_c.initPeriod()
         t = time.perf_counter() - t_start
+        ######
+        n_cycles += 1 
 
         # ---- estimation ----
         est.predict(lim.a_applied, time.perf_counter())
@@ -122,15 +141,25 @@ try:
         tcp = np.array(rtde_r.getActualTCPPose()[:2])
         v_tcp = np.array(rtde_r.getActualTCPSpeed()[:2])
 
+        ###### annuler le comportement du kalman.
+        n_err = np.linalg.norm(erreur)
+        if err_ref is None or abs(n_err - err_ref) > APPUI_D_ERR:
+            err_ref, t_err_ref = n_err, t          # l'erreur bouge encore
+        appui = (t - t_err_ref) > APPUI_T
+
         # ---- safety ----
         if time.perf_counter() - etat["t"] > AGE_MAX:
             raison = "vision perdue"; break
-        if not all(etat["vus"]):
-            raison = "un marqueur n'est plus visible"; break
+        if not etat["vus"][1]:
+            raison = "marqueur de charge perdu"; break
+        if etat["vus"][0]:
+            t_ref_vue = time.perf_counter()
+        elif time.perf_counter() - t_ref_vue > REF_PERDUE_MAX:
+            raison = "marqueur de reference perdu > 1 s"; break
         if np.max(np.abs(th)) > THETA_MAX:
             raison = f"ballant {np.degrees(np.max(np.abs(th))):.1f} deg"; break
-        if np.any(np.abs(tcp - p_start) > COURSE_MAX):
-            raison = f"hors course {np.round(tcp - p_start, 3)}"; break
+        # if np.any(np.abs(tcp - p_start) > COURSE_MAX):
+        #     raison = f"hors course {np.round(tcp - p_start, 3)}"; break
         if t > TIMEOUT:
             raison = "timeout"; break
 
@@ -143,8 +172,12 @@ try:
             err_fb = erreur                       # no plan: aim straight at the target
 
         # ---- feedback ----
-        v_fb = (feedback(err_fb, th, thd, gains, V_FB_MAX) if FEEDBACK
-                else np.zeros(2))
+        if FEEDBACK:
+            actif = (not FEEDFORWARD) or traj.terminee(t) and not appui
+            v_fb = (feedback(err_fb, th, thd, gains, V_FB_MAX)
+                    + integ(err_fb, actif))
+        else:
+            v_fb = np.zeros(2)
 
         v = lim(v_ref + v_fb)
 
@@ -158,9 +191,10 @@ try:
             rtde_c.speedL([v[0], v[1], 0.0, 0.0, 0.0, 0.0], A_MAX, Ts)
 
         w.writerow([f"{t:.4f}"] + [f"{x:.5f}" for x in
-                   (*erreur, *th, *thd, etat.get("yaw", 0.0),
+                (*erreur, *th, *thd, etat.get("yaw", 0.0),
                     *v_ref, *v_fb, *v, *tcp)] +
-                   [int(bool(etat.get("dans_cible")))])
+                [int(bool(etat.get("dans_cible")))] +
+                [f"{etat['theta'][0]:.5f}", f"{etat['theta'][1]:.5f}"])
 
         # ---- end of run ----
         if FEEDBACK:
@@ -192,6 +226,16 @@ finally:
     if not DRY_RUN:
         rtde_c.speedStop()
     time.sleep(0.2)
+
+    if not DRY_RUN and raison in ("cible atteinte",
+                                  "fin du plan, ballant residuel enregistre"):
+        print("\n\nattente de l'immobilisation de la charge...")
+        time.sleep(3.0)
+        if input("retour a la pose de depart ? [o/N] ").strip().lower() == "o":
+            print("retour en cours...")
+            rtde_c.moveL(POSE_DEPART, 0.05, 0.2)
+            print("retour termine.")
+
     log.close()
     e_fin = np.asarray(etat.get("erreur", np.zeros(2)), float)
     print(f"\n\nconfiguration {CONFIG}   arret: {raison}")
@@ -200,6 +244,7 @@ finally:
     print(f"ballant maximal   {np.degrees(pic_ballant):6.2f} deg")
     print(f"ballant final     {np.degrees(np.max(np.abs(est.theta))):6.2f} deg")
     print(f"duree             {time.perf_counter()-t_start:6.2f} s")
+    print(f"frequence boucle  {n_cycles/(time.perf_counter()-t_start):6.0f} Hz")
     print(f"saturation {100*lim.taux_saturation:.1f} %   "
           f"mesures rejetees {est.x.n_rejets}/{est.y.n_rejets}")
     print(f"journal ecrit: {NOM_CSV}")
