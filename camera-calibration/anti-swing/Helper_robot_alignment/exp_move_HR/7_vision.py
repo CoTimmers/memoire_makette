@@ -59,14 +59,15 @@ TAILLE_CHARGE = 0.100           # printed side of marker 12 [m]
 TAILLE_REF    = 0.157           # printed side of marker 8  [m]
 
 # Offsets in each marker's own frame, so they rotate with it.
-OFFSET_PIVOT   = np.array([-0.07, 0.095, 0.0])   # marker 12 -> cable attachment
-OFFSET_ORIGINE = np.array([ 0.00, 0.000, 0.0])   # marker 8  -> world origin
+OFFSET_PIVOT   = np.array([0.25, 0.07, 0.0])   # marker 12 -> cable attachment
+OFFSET_ORIGINE = np.array([ 0.20, -0.10, 0.0])   # marker 8  -> world origin
                                                  # MEASURE THIS ON THE BENCH
 
 # The two working points, in world axes. Both on the 45 degree diagonal:
 # |D1| = 400 mm, |D3| = 50 mm.
-D1 = np.array([0.2828, 0.2828, 0.0])
-D3 = np.array([0.0353, 0.0353, 0.0])
+D1 = np.array([0.2828, -0.2828, 0.0])
+D3 = np.array([-0.103, -0.0353, 0.0])
+# D3 = np.array([0.13, -0.13, 0.0])
 
 RAYON_OK = 0.030                # radius within which D1 counts as reached [m]
 
@@ -262,7 +263,8 @@ def _loop(etat, l_cable):
                       f"dist origine {1000*etat.get('dist_origine', 0):5.0f} mm",
                       f"theta        {np.degrees(etat['theta'][0]):+5.1f}, "
                       f"{np.degrees(etat['theta'][1]):+5.1f} deg",
-                      f"yaw          {np.degrees(etat.get('yaw', 0.0)):+6.1f} deg",
+                      f"phi          {np.degrees(etat.get('yaw', 0.0)):+6.1f} deg"
+                      f"   (0 = axes alignes)",
                       f"l_mes        {etat['l_mes']:.3f} m  (expected "
                       f"{l_cable:.3f})",
                       f"seen         ref(8) {ref is not None}   "

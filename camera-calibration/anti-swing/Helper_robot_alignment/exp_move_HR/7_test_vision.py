@@ -35,9 +35,9 @@ import numpy as np
 import time
 from importlib import import_module
 
-vision = import_module("7_vision")
+vision = import_module("7_vision_2")
 
-L_CABLE = 1.11                  # same value as 7_main.py [m]
+L_CABLE = 0.8                  # same value as 7_main.py [m]
 
 vision.AFFICHAGE = True         # debug window
 vision.CIBLE_ACTIVE = "d3"      # which point is drawn in green

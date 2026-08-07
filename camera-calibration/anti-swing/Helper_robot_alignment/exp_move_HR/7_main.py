@@ -51,8 +51,8 @@ Integrateur     = _ctl_mod.Integrateur
 
 # ---------------- configuration ----------------
 ROBOT_IP = "192.168.56.102"
-L_VRAI   = 1.11                 # measured cable length [m]
-L_MODELE = 1.11                 # length the controller believes in [m]
+L_VRAI   = 1.0                 # measured cable length [m]
+L_MODELE = 1.0                 # length the controller believes in [m]
 Ts       = 1 / 500
 
 ALLER_A_D1 = True               # phase 0: reposition before launching
@@ -65,23 +65,25 @@ T1     = 2 * np.pi * np.sqrt(L_MODELE / 9.81)   # ramp duration, one period [s]
 # pendulum, puts the contact threshold at 0.16 m/s for D3 at 50 mm. At 0.15 the
 # load stops about 3 mm short. Raise this, or move D3 in, before expecting a
 # contact.
-V_TRAJ = 0.15
-T_LIBRE = 1.0                   # duration of the free phase after the stop [s]
+V_TRAJ = 0.25
+T_LIBRE = 0.8     # duration of the free phase after the stop [s]
+T_OBSERV = 8.0                  # enregistrement apres le retour, pour le yaw [s]
 
-ZETA_CL, OMEGA_T = 0.15, 0.3    # closed-loop sway damping, position bandwidth
-K_I, I_MAX = 0.15, 0.05
+ZETA_CL, OMEGA_T = 0.3, 0.5    # closed-loop sway damping, position bandwidth
+K_I, I_MAX = 0.4, 0.06
 # The integral term exists to beat static friction at the end of a move, not to
 # produce the move. Left running over a 350 mm error it saturates and carries
 # the load well past the target, so it only wakes up inside this radius.
-SEUIL_INTEG = 0.05              # [m]
+SEUIL_INTEG = 0.10              # [m]
 
-V_MAX, A_MAX, JERK_MAX = 0.3, 0.8, 32.0
+V_MAX, A_MAX, JERK_MAX = 0.5, 1.1, 32.0
 A_STOP     = 4.0                # deceleration of the deliberate stop [m/s2]
 V_FB_MAX   = 0.25               # saturation of the feedback part alone [m/s]
 COURSE_MAX = 0.60               # excursion allowed from the start pose [m]
 THETA_MAX  = np.radians(20)
 AGE_MAX    = 0.30               # max age of a vision measurement [s]
-REF_PERDUE_MAX = 2.0            # tolerated blackout on the crate marker [s]
+REF_PERDUE_MAX = 3.0
+CHARGE_PERDUE_MAX = 3.0         # tolerated blackout on the crate marker [s]
 TIMEOUT    = 120.0
 NIS_LIBRE  = 400.0              # relaxed outlier test around the impact
 DRY_RUN    = False              # True = no motion, display only
@@ -162,9 +164,12 @@ w.writerow(["t", "phase", "ex", "ey", "th_x", "th_y", "thd_x", "thd_y", "yaw",
 phase = ALLER if ALLER_A_D1 else APPROCHE
 t_phase = 0.0
 traj = None
+traj_ret = None
 e0 = np.zeros(2)
+e0_ret = np.zeros(2)
 t_last = 0.0
 t_ref_vue = time.perf_counter()
+t_charge_vue = time.perf_counter()
 raison = "sequence terminee"
 n_cycles = 0
 pic_ballant = 0.0
@@ -173,6 +178,7 @@ journal_phases = []
 # recorded around the impact, for the report
 pic_libre, t_pic_libre, dist_min = 0.0, 0.0, 1e9
 tcp_arret = None
+tcp_d1 = None
 
 
 def demarre_approche(t):
@@ -215,14 +221,17 @@ try:
         v_tcp = np.array(rtde_r.getActualTCPSpeed()[:2])
 
         # ---- safety ----
-        if time.perf_counter() - etat["t"] > AGE_MAX:
-            raison = "vision perdue"; break
-        if not etat["vus"][1]:
-            raison = "marqueur de charge (12) perdu"; break
-        if etat["vus"][0]:
-            t_ref_vue = time.perf_counter()
-        elif time.perf_counter() - t_ref_vue > REF_PERDUE_MAX:
-            raison = "marqueur de reference (8) perdu"; break
+        if phase != RETOUR:
+            if time.perf_counter() - etat["t"] > AGE_MAX:
+                raison = "vision perdue"; break
+            if etat["vus"][1]:
+                t_charge_vue = time.perf_counter()
+            elif time.perf_counter() - t_charge_vue > CHARGE_PERDUE_MAX:
+                raison = "marqueur de charge (12) perdu"; break
+            if etat["vus"][0]:
+                t_ref_vue = time.perf_counter()
+            elif time.perf_counter() - t_ref_vue > REF_PERDUE_MAX:
+                raison = "marqueur de reference (8) perdu"; break
         if np.max(np.abs(th)) > THETA_MAX:
             raison = f"ballant {np.degrees(np.max(np.abs(th))):.1f} deg"; break
         if np.any(np.abs(tcp - p_start) > COURSE_MAX):
@@ -241,6 +250,7 @@ try:
                 v_fb = (feedback(erreur, th, thd, gains, V_FB_MAX)
                         + integ(erreur, proche))
             if fin_aller(erreur, th, thd, v_tcp, t):
+                tcp_d1 = rtde_r.getActualTCPPose()
                 journal_phases.append((NOM_PHASE[phase], tau))
                 phase, t_phase = APPROCHE, t
                 integ.reset()
@@ -270,25 +280,20 @@ try:
             dist_min = min(dist_min, etat["dist_origine"])
             if tau > T_LIBRE:
                 journal_phases.append((NOM_PHASE[phase], tau))
-                phase, t_phase = RETOUR, t
-                lim.regle(a_max=A_MAX, jerk_max=JERK_MAX)
-                est.gonfle()                 # the impact broke the model, re-open
-                vision.CIBLE_ACTIVE = "d1"
-                fin_retour.reset()
-                integ.reset()
                 print(f"\n[libre] pic {np.degrees(pic_libre):.2f} deg a "
                       f"{t_pic_libre:.3f} s (T/4 = {T1/4:.3f} s)   "
                       f"approche mini {1000*dist_min:.0f} mm")
+                raison = "phase libre terminee"
+                break
 
         else:                                        # RETOUR
             erreur = err_d1
-            if FEEDBACK:
-                proche = np.linalg.norm(erreur) < SEUIL_INTEG
-                v_fb = (feedback(erreur, th, thd, gains, V_FB_MAX)
-                        + integ(erreur, proche))
-            if fin_retour(erreur, th, thd, v_tcp, t):
+            if traj_ret is None:
+                raison = "pas de plan de retour"; break
+            _, v_ref, _ = traj_ret(tau)
+            if traj_ret.terminee(tau):
                 journal_phases.append((NOM_PHASE[phase], tau))
-                raison = "sequence terminee"
+                raison = "plan de retour termine"
                 break
 
         v = lim(v_ref + v_fb)
@@ -323,6 +328,29 @@ finally:
     if not DRY_RUN:
         rtde_c.speedStop()
     time.sleep(0.2)
+
+    # retour a D1 par les encodeurs, puis observation du yaw qui s'amortit
+    if not DRY_RUN and tcp_d1 is not None:
+        print("\nretour a D1 par les encodeurs...")
+        rtde_c.moveL(tcp_d1, 0.15, 0.5)
+        print(f"retour termine, observation du yaw pendant {T_OBSERV:.0f} s...")
+        t_obs = time.perf_counter()
+        while time.perf_counter() - t_obs < T_OBSERV:
+            t = time.perf_counter() - t_start
+            est.predict(np.zeros(2), time.perf_counter())
+            if etat["t"] > t_last:
+                est.update(etat["theta"], etat["t"], NIS_LIBRE)
+                t_last = etat["t"]
+            tcp = np.array(rtde_r.getActualTCPPose()[:2])
+            w.writerow([f"{t:.4f}", RETOUR] + [f"{x:.5f}" for x in
+                       (*np.asarray(etat["err_d1"], float),
+                        *est.theta, *est.theta_dot, etat.get("yaw", 0.0),
+                        *np.asarray(etat.get("pos_monde", np.zeros(2)), float),
+                        etat.get("dist_origine", 0.0),
+                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, *tcp)] +
+                       [f"{etat['theta'][0]:.5f}", f"{etat['theta'][1]:.5f}"])
+            time.sleep(0.01)
+
     log.close()
 
     duree = time.perf_counter() - t_start
@@ -346,10 +374,8 @@ finally:
           f"mesures rejetees {est.x.n_rejets}/{est.y.n_rejets}")
     print(f"journal ecrit: {NOM_CSV}")
 
-    if not DRY_RUN and raison == "sequence terminee":
-        print("\nattente de l'immobilisation de la charge...")
-        time.sleep(3.0)
-        if input("retour a la pose de depart ? [o/N] ").strip().lower() == "o":
+    if not DRY_RUN:
+        if input("\nretour a la pose de depart ? [o/N] ").strip().lower() == "o":
             rtde_c.moveL(POSE_DEPART, 0.05, 0.2)
             print("retour termine.")
 
