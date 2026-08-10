@@ -42,8 +42,12 @@ etat = {}
 vision.start(etat, L_CABLE)
 print(f"OFFSET_ACCROCHE {vision.OFFSET_ACCROCHE.tolist()}   sur le marqueur "
       f"{vision.ID_CHARGE}")
-print(f"OFFSET_HELPER   {vision.OFFSET_HELPER.tolist()}   sur le marqueur "
-      f"{vision.ID_HELPER}")
+# print(f"OFFSET_HELPER   {vision.OFFSET_HELPER.tolist()}   sur le marqueur "
+#       f"{vision.ID_HELPER}")
+print(f"OFFSET_LONG_SIDE  {vision.OFFSET_LONG_SIDE_ALIGNED.tolist()}   sur le marqueur "
+f"{vision.ID_HELPER}")
+print(f"OFFSET_SHORT_SIDE {vision.OFFSET_SHORT_SIDE_ALIGNED.tolist()}   sur le marqueur "
+f"{vision.ID_HELPER}")
 print(f"OFFSET_ORIGINE  {vision.OFFSET_ORIGINE.tolist()}   sur le marqueur "
       f"{vision.ID_REF}")
 print(f"seuil de mouvement du helper: {1000*vision.SEUIL_BOUGE:.0f} mm")

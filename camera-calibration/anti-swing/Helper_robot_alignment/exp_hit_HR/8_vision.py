@@ -62,7 +62,7 @@ CALIB_FILE = "output/calibration_data.pkl"
 
 ID_CHARGE = 8                   # crate, hanging
 ID_HELPER = 12                  # helper on the floor, measured
-ID_REF    = 5                   # new marker, static anchor
+ID_REF    = 10                   # new marker, static anchor
 
 TAILLE_CHARGE = 0.157           # printed side [m]
 TAILLE_HELPER = 0.100
@@ -70,12 +70,13 @@ TAILLE_REF    = 0.157
 
 # Offsets, unchanged from the previous experiments. OFFSET_ACCROCHE is on the
 # crate; the four below are on the helper, and are applied to its frozen pose.
-OFFSET_ACCROCHE = np.array([-0.05, 0.12, 0.0])    # marker 8 -> cable attachment
+OFFSET_ACCROCHE = np.array([-0.05, 0.10, 0.0])    # marker 8 -> cable attachment
 OFFSET_ORIGINE  = np.array([-0.07, 0.095, 0.0])   # helper   -> world origin
 CRANE_TARGET    = np.array([-0.15, -0.17, 0.0])   # origin   -> point aimed at
 CIBLE_DEMI      = np.array([0.030, 0.030])
 OFFSET_LONG_SIDE_ALIGNED  = np.array([-0.155, -0.225, 0.0])
 OFFSET_SHORT_SIDE_ALIGNED = np.array([-0.250, -0.160, 0.0])
+
 
 # Camera horizontal axes -> robot base axes. From calib_cam2base.py.
 CAM2BASE = np.array([[1.0, 0.0],
@@ -83,7 +84,7 @@ CAM2BASE = np.array([[1.0, 0.0],
 
 RETARD_CAM  = 0.031             # capture -> availability [s]
 N_CALIB     = 60                # frames for the suspension and the frozen pose
-ALPHA_REF   = 0.5               # low-pass on the ID_REF frame
+ALPHA_REF   = 0.1               # low-pass on the ID_REF frame
 SEUIL_BOUGE = 0.005             # displacement above which the helper has moved [m]
 
 AFFICHAGE = False               # True to open the debug window

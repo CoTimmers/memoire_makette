@@ -54,19 +54,19 @@ Integrateur     = controller.Integrateur
 
 # ---------------- configuration ----------------
 ROBOT_IP = "192.168.56.102"
-L_VRAI   = 1.11
-L_MODELE = 1.11
+L_VRAI   = 1.07
+L_MODELE = 1.10
 Ts       = 1 / 500
 
 FEEDFORWARD = True
 FEEDBACK    = True
 
 T1     = 2 * np.pi * np.sqrt(L_MODELE / 9.81)
-V_TRAJ = 0.15                   # plan speed: the variable of the experiment
+V_TRAJ = 0.08                   # plan speed: the variable of the experiment
 
-ZETA_CL, OMEGA_T = 0.15, 0.3
+ZETA_CL, OMEGA_T = 0.7, 0.3
 K_I, I_MAX = 0.15, 0.05
-SEUIL_INTEG = 0.05
+SEUIL_INTEG = 0.12
 
 V_MAX, A_MAX, JERK_MAX = 0.3, 0.8, 32.0
 V_FB_MAX   = 0.25
@@ -75,7 +75,7 @@ THETA_MAX  = np.radians(20)
 AGE_MAX    = 0.30
 REF_PERDUE_MAX = 2.0
 T_OBSERV   = 5.0                # recording after the plan, to see the helper settle
-TIMEOUT    = 120.0
+TIMEOUT    = 15.0
 NIS_CHOC   = 400.0              # relaxed outlier test once contact has happened
 DRY_RUN    = False
 
@@ -154,8 +154,7 @@ try:
         # ---- estimation ----
         est.predict(lim.a_applied, time.perf_counter())
         if etat["t"] > t_last:
-            est.update(etat["theta"], etat["t"],
-                       NIS_CHOC if t_choc is not None else 25.0)
+            est.update(etat["theta"], etat["t"])
             t_last = etat["t"]
         th, thd = est.theta, est.theta_dot
         pic_ballant = max(pic_ballant, float(np.max(np.abs(th))))
@@ -175,7 +174,7 @@ try:
             t_choc = t
             v_choc = float(np.linalg.norm(v_charge))
             th_avant_choc = float(np.max(np.abs(th)))
-            est.gonfle()            # the collision is not in the pendulum model
+            # est.gonfle()            # the collision is not in the pendulum model
             print(f"\n[choc] t = {t:.2f} s   vitesse charge "
                   f"{1000*v_choc:.0f} mm/s   ballant avant "
                   f"{np.degrees(th_avant_choc):.2f} deg")
@@ -273,7 +272,7 @@ finally:
     time.sleep(0.2)
 
     # let the helper settle before reading its final pose
-    if not DRY_RUN and raison in ("cible atteinte", "fin du plan, etat final enregistre"):
+    if not DRY_RUN:
         print("\n\nattente de l'immobilisation...")
         time.sleep(3.0)
     depl_fin = np.asarray(etat.get("helper_depl", np.zeros(2)), float)
@@ -314,7 +313,7 @@ finally:
           f"mesures rejetees {est.x.n_rejets}/{est.y.n_rejets}")
     print(f"journal ecrit: {NOM_CSV}")
 
-    if not DRY_RUN and raison in ("cible atteinte", "fin du plan, etat final enregistre"):
+    if not DRY_RUN:
         if input("retour a la pose de depart ? [o/N] ").strip().lower() == "o":
             rtde_c.moveL(POSE_DEPART, 0.05, 0.2)
             print("retour termine.")
