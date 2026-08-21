@@ -80,15 +80,15 @@ TAILLE_REF = 0.100
 
 # Reference marker -> helper/world origin
 OFFSET_ORIGINE = np.array([
-    -0.07,
-     0.095,
+     0.080,
+     0.065,
      0.0
 ])
 
 # Crate marker -> cable attachment point
 OFFSET_ACCROCHE = np.array([
-    -0.05,
-     0.12,
+    -0.01,
+     0.09,
      0.0
 ])
 
@@ -459,6 +459,8 @@ def _loop(etat, l_cable):
         1
     )
 
+    ok0, f0 = cap.read()
+    print("frame:", f0.shape if ok0 else "echec")
 
     # --------------------------------------------------------
     # Calibration state
@@ -610,6 +612,11 @@ def _loop(etat, l_cable):
         if ref is not None:
 
             p_r, R_r = ref
+
+            # origine_ref = (
+            #     p_r
+            #     + R_r @ OFFSET_ORIGINE
+            # )
 
 
             # ------------------------------------------------
@@ -844,6 +851,8 @@ def _loop(etat, l_cable):
                 )
 
 
+
+
                 # --------------------------------------------
                 # Draw helper reference frame
                 # --------------------------------------------
@@ -869,6 +878,44 @@ def _loop(etat, l_cable):
                     (255, 255, 0),
                     1,
                     cv2.LINE_AA
+                )
+
+                # --------------------------------------------
+                # Draw helper origin / pivot
+                # --------------------------------------------
+
+                u_origine = _projette(
+                    coin,
+                    mtx,
+                    dist
+                )
+
+                cv2.circle(
+                    frame,
+                    u_origine,
+                    7,
+                    (255, 0, 255),      # magenta, BGR
+                    2
+                )
+
+                cv2.putText(
+                    frame,
+                    "origin",
+                    (
+                        u_origine[0] + 12,
+                        u_origine[1] - 10
+                    ),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 0, 255),
+                    1,
+                    cv2.LINE_AA
+                )
+
+
+                vue = cv2.rotate(
+                    frame,
+                    cv2.ROTATE_90_COUNTERCLOCKWISE
                 )
 
 
@@ -930,7 +977,7 @@ def _loop(etat, l_cable):
 
                     # black background
                     cv2.putText(
-                        frame,
+                        vue,
                         text,
                         (10, y),
                         cv2.FONT_HERSHEY_SIMPLEX,
@@ -955,7 +1002,7 @@ def _loop(etat, l_cable):
 
 
                     cv2.putText(
-                        frame,
+                        vue,
                         text,
                         (10, y),
                         cv2.FONT_HERSHEY_SIMPLEX,
@@ -968,7 +1015,7 @@ def _loop(etat, l_cable):
 
                 cv2.imshow(
                     "FSM vision",
-                    frame
+                    vue
                 )
 
                 cv2.waitKey(1)
