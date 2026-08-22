@@ -40,6 +40,9 @@ C_ATTACH = "#d1495b"
 C_TCP = "#00798c"
 C_FOND = "0.85"
 
+MIROIR_X = -1
+MIROIR_Y = -1
+
 
 # ------------------------------------------------------------
 # Geometrie
@@ -178,7 +181,20 @@ df["tcp_y"] = df["tcp_base_y"]
 for col in ["attach_x", "attach_y", "tcp_x", "tcp_y"]:
     df[col] = 1000.0 * df[col]
 
+# miroirs d'affichage autour de x = 0 et y = 0
+df["attach_x"] *= MIROIR_X
+df["attach_y"] *= MIROIR_Y
+df["tcp_x"] *= MIROIR_X
+df["tcp_y"] *= MIROIR_Y
+
 MARQUEUR_MM = 1000.0 * T_MARKER_IN_BASE
+MARQUEUR_MM[0] *= MIROIR_X
+MARQUEUR_MM[1] *= MIROIR_Y
+
+CONSIGNES = {
+    nom: (MIROIR_X * x, MIROIR_Y * y)
+    for nom, (x, y) in CONSIGNES.items()
+}
 
 df["yaw_deg"] = np.degrees(df["yaw_ref"])
 

@@ -62,8 +62,10 @@ print(f"Z fige a {1000*Z_FIXE:.1f} mm")
 
 POSES_MM = [
     ("home",             530,   39),
-    ("engage_pivoting",  530, -141),
+    ("engage_pivoting",  530, -141), #Avant de changer les region acceptable
+    # ("engage_pivoting",  530, -175),
     ("finish_pivoting",  530, -293),
+    # ("finish_pivoting",  530, -300),
     ("shift_1",          595, -293),
     ("shift_2",          595,   23),
     ("shift_3",          565,  -33),
